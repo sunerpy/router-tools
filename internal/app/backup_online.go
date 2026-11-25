@@ -44,22 +44,25 @@ func (s *Service) BackupVerifyOnline(ctx context.Context, request BackupOnlineVe
 	if err := request.RootPassword.Validate(); err != nil {
 		return fail(err)
 	}
-	driver, probe, err := s.resolveOperationTarget(ctx, request.Target, request.ProfileID)
+	if err := s.checkProfileID(request.ProfileID); err != nil {
+		return fail(err)
+	}
+	adapter, probe, err := s.resolveOperationTarget(ctx, request.Target, request.ProfileID)
 	if err != nil {
 		return fail(err)
 	}
-	if !driver.Profile().Supports(device.CapabilityBackup) {
+	if !adapter.Profile().Supports(device.CapabilityBackup) {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected profile does not support online backup verification"})
 	}
-	verifier, ok := s.prober.(OnlineBackupVerifier)
+	verifier, ok := adapter.Operations.(OnlineBackupVerifier)
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "online backup verification is unavailable"})
 	}
 	observation := probe.Observation
 	if observation.Hardware == "" {
-		observation.Hardware = driver.Profile().Hardware
+		observation.Hardware = adapter.Profile().Hardware
 	}
-	if err := verifier.VerifyBackupOnline(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, manifest, observation, driver.Profile().ID); err != nil {
+	if err := verifier.VerifyBackupOnline(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, manifest, observation, adapter.Profile().ID); err != nil {
 		return fail(err)
 	}
 	report.Valid = true

@@ -43,6 +43,39 @@ export interface HostKeyPrompt {
   fingerprint: string;
 }
 
+/** Deep-persistence safety parameters of one profile (device.DeepPolicy). */
+export interface DeepPolicy {
+  acknowledgement: string;
+  reboot_transitions: number;
+}
+
+/** One exact model+firmware profile (device.Profile). */
+export interface Profile {
+  id: string;
+  model_id: string;
+  vendor: string;
+  model: string;
+  hardware: string;
+  firmware: string;
+  capabilities: string[] | null;
+  deep?: DeepPolicy;
+}
+
+/** A registered profile whose model matches an observation; explains failures, never selects. */
+export interface ProfileMatch {
+  profile: Profile;
+  exact: boolean;
+}
+
+/** Registered firmware profiles of one model in registration order (device.CatalogEntry). */
+export interface CatalogEntry {
+  model_id: string;
+  vendor: string;
+  model: string;
+  hardware: string;
+  profiles: Profile[];
+}
+
 export interface HistoryEntry {
   operation_id: string;
   operation: string;
@@ -61,6 +94,7 @@ export interface RouterAPI {
   BackupVerify(request: OperationRequest): Promise<any>;
   BackupVerifyOnline(request: OperationRequest): Promise<any>;
   DeepPersist(request: OperationRequest): Promise<any>;
+  Catalog(): Promise<CatalogEntry[]>;
   Cancel(operationID: string): Promise<boolean>;
   ListReports(): Promise<HistoryEntry[]>;
   ResolveHostKey(promptID: string, accept: boolean): void;

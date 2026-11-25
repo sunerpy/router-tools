@@ -29,6 +29,7 @@ type Application interface {
 	BackupVerify(context.Context, string, app.EventSink) (app.BackupVerifyReport, error)
 	BackupVerifyOnline(context.Context, app.BackupOnlineVerifyRequest, app.EventSink) (app.BackupVerifyReport, error)
 	DeepPersist(context.Context, app.DeepRequest, app.EventSink) (app.DeepReport, error)
+	Catalog() []device.CatalogEntry
 }
 
 // EventEmitter forwards operation-scoped progress to the frontend.
@@ -302,6 +303,12 @@ func (s *Service) DeepPersist(ctx context.Context, request OperationRequest) (ap
 		AckDeep: request.AckDeep, BackupDir: request.BackupDir, RunDir: request.RunDir,
 	}, s.events(request.OperationID))
 	return report, s.settle(request.OperationID, "deep-persist", report, report.Status, err)
+}
+
+// Catalog lists the registered device models and exact firmware profiles. It needs no operation ID, no
+// network and records no history.
+func (s *Service) Catalog() []device.CatalogEntry {
+	return s.application.Catalog()
 }
 
 // Cancel requests cancellation of an active operation.

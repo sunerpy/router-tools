@@ -116,7 +116,7 @@ Local artifacts are under `cmd/routergui/build/bin/`. `scripts/package-gui.sh wi
 - An open TCP port is not authentication evidence. SSH success requires password authentication plus exact `id -u == 0`.
 - Unknown or changed SSH host keys fail closed. A host-key mismatch never falls back to Telnet.
 - Device changes require exact profile compatibility and a per-target non-blocking operation lock.
-- `--yes` confirms ordinary changes only. Deep persistence additionally requires `--allow-telnet`, a verified current-boot backup, and exact `RD08-DEEP`.
+- `--yes` confirms ordinary changes only. Deep persistence additionally requires `--allow-telnet`, a verified current-boot backup, and the resolved profile's exact acknowledgement (`RD08-DEEP` for RD08 1.1.96). `routerctl profiles` lists the supported models and firmware.
 - A deep write timeout is `unknown`, not a retryable failure. Existing deep journals block blind restart.
 - There is no automatic restore, automatic rescue, generic remote-shell command, or arbitrary script profile mechanism.
 

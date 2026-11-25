@@ -78,22 +78,25 @@ func (s *Service) Verify(ctx context.Context, request VerifyRequest, events Even
 	if request.Transport == "telnet" && !request.AllowTelnet {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "Telnet requires explicit --allow-telnet"})
 	}
+	if err := s.checkProfileID(request.ProfileID); err != nil {
+		return fail(err)
+	}
 	emit("probe", "running")
-	probe, err := s.prober.Probe(ctx, request.Target)
+	probe, err := s.discovery.Probe(ctx, request.Target)
 	if err != nil {
 		return fail(err)
 	}
 	report.Device = probe.Observation
 	emit("compatibility", "running")
-	driver, err := s.resolveProfile(request.ProfileID, probe.Observation)
+	adapter, err := s.resolveProfile(request.ProfileID, probe.Observation)
 	if err != nil {
 		return fail(err)
 	}
-	report.Profile = driver.Profile()
+	report.Profile = adapter.Profile()
 	if !report.Profile.Supports(device.CapabilityVerify) {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected profile does not support root verification"})
 	}
-	verifier, ok := s.prober.(RootVerifier)
+	verifier, ok := adapter.Operations.(RootVerifier)
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected prober does not support root verification"})
 	}
@@ -115,7 +118,8 @@ func (s *Service) Verify(ctx context.Context, request VerifyRequest, events Even
 	return report, nil
 }
 
-func (s *Service) resolveProfile(profileID string, observation device.Observation) (device.Driver, error) {
+// resolveProfile returns the exact adapter for the observation; an explicit profile never falls back.
+func (s *Service) resolveProfile(profileID string, observation device.Observation) (device.Adapter, error) {
 	if profileID != "" && profileID != "auto" {
 		return s.registry.ResolveProfile(profileID, observation)
 	}

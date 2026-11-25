@@ -18,6 +18,9 @@ import (
 	"github.com/sunerpy/router-tools/internal/secret"
 )
 
+// rd08Deep mirrors the RD08 1.1.96 profile's deep policy.
+var rd08Deep = &device.DeepPolicy{Acknowledgement: "RD08-DEEP", RebootTransitions: 3}
+
 type deepAppProber struct {
 	fakeProber
 	result app.DeepResult
@@ -35,9 +38,9 @@ func (p *deepAppProber) DeepPersist(_ context.Context, params app.DeepParams) (a
 func TestDeepRequiresDedicatedAcknowledgement(t *testing.T) {
 	t.Parallel()
 
-	registry, _ := device.NewRegistry(fakeDriver{profile: device.Profile{ID: "test"}})
 	prober := &deepAppProber{}
-	service, _ := app.NewService(registry, prober)
+	deep := fakeDriver{profile: device.Profile{ID: "xiaomi-rd08-1.1.96", Capabilities: []device.Capability{device.CapabilityDeepPersist}, Deep: rd08Deep}}
+	service, _ := app.NewService(newTestRegistry(t, deep, prober), prober)
 	password, _ := secret.NewPassword("root")
 	_, err := service.DeepPersist(t.Context(), app.DeepRequest{
 		Target: device.DefaultTarget(), RootPassword: password, AllowTelnet: true, AckDeep: "yes",
@@ -46,6 +49,15 @@ func TestDeepRequiresDedicatedAcknowledgement(t *testing.T) {
 	if prober.calls != 0 || prober.fakeProber.calls != 0 {
 		t.Fatal("deep operation accessed network without RD08-DEEP")
 	}
+
+	// The registered phrase passes the offline check: the next gate (no backup) stops it, still offline.
+	_, err = service.DeepPersist(t.Context(), app.DeepRequest{
+		Target: device.DefaultTarget(), RootPassword: password, AllowTelnet: true, AckDeep: "RD08-DEEP",
+	}, nil)
+	assertCode(t, err, device.CodeBackupMissing)
+	if prober.calls != 0 || prober.fakeProber.calls != 0 {
+		t.Fatal("deep operation accessed network before its backup gate")
+	}
 }
 
 func TestDeepSucceedsWithVerifiedBackupAndJournal(t *testing.T) {
@@ -53,8 +65,7 @@ func TestDeepSucceedsWithVerifiedBackupAndJournal(t *testing.T) {
 
 	const profileID = "xiaomi-rd08-1.1.96"
 	backupDir := makeDeepBackupFixture(t, profileID)
-	driver := fakeDriver{profile: device.Profile{ID: profileID, Capabilities: []device.Capability{device.CapabilityDeepPersist}}, match: device.MatchResult{Level: device.ExactMatch}}
-	registry, _ := device.NewRegistry(driver)
+	driver := fakeDriver{profile: device.Profile{ID: profileID, Capabilities: []device.Capability{device.CapabilityDeepPersist}, Deep: rd08Deep}, match: device.MatchResult{Level: device.ExactMatch}}
 	prober := &deepAppProber{
 		fakeProber: fakeProber{result: device.ProbeResult{Observation: device.Observation{DeviceID: "DEVICE", Hardware: "RD08", ROMVersion: "1.1.96"}}},
 		result: app.DeepResult{
@@ -66,7 +77,7 @@ func TestDeepSucceedsWithVerifiedBackupAndJournal(t *testing.T) {
 			},
 		},
 	}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 	password, _ := secret.NewPassword("root")
 	report, err := service.DeepPersist(t.Context(), app.DeepRequest{
 		Target: device.DefaultTarget(), RootPassword: password, AllowTelnet: true,
@@ -91,10 +102,9 @@ func TestDeepRejectsExistingJournalBeforeAdapter(t *testing.T) {
 
 	const profileID = "xiaomi-rd08-1.1.96"
 	backupDir := makeDeepBackupFixture(t, profileID)
-	driver := fakeDriver{profile: device.Profile{ID: profileID, Capabilities: []device.Capability{device.CapabilityDeepPersist}}, match: device.MatchResult{Level: device.ExactMatch}}
-	registry, _ := device.NewRegistry(driver)
+	driver := fakeDriver{profile: device.Profile{ID: profileID, Capabilities: []device.Capability{device.CapabilityDeepPersist}, Deep: rd08Deep}, match: device.MatchResult{Level: device.ExactMatch}}
 	prober := &deepAppProber{fakeProber: fakeProber{result: device.ProbeResult{Observation: device.Observation{DeviceID: "DEVICE", Hardware: "RD08", ROMVersion: "1.1.96"}}}}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 	password, _ := secret.NewPassword("root")
 	runDir := t.TempDir()
 	journalPath := filepath.Join(runDir, "192.168.31.1-deep.json")

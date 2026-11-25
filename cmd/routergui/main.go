@@ -12,7 +12,7 @@ import (
 
 	"github.com/sunerpy/router-tools/internal/app"
 	"github.com/sunerpy/router-tools/internal/device"
-	rd08v1196 "github.com/sunerpy/router-tools/internal/devices/xiaomi/rd08/v1_1_96"
+	"github.com/sunerpy/router-tools/internal/devices/builtin"
 	"github.com/sunerpy/router-tools/internal/safety/oplock"
 )
 
@@ -41,8 +41,7 @@ func main() {
 }
 
 func newApplicationService() (*app.Service, error) {
-	driver := rd08v1196.New()
-	registry, err := device.NewRegistry(driver)
+	registry, err := device.NewRegistry(builtin.Adapters()...)
 	if err != nil {
 		return nil, err
 	}
@@ -51,5 +50,5 @@ func newApplicationService() (*app.Service, error) {
 		configDir = "."
 	}
 	locker := oplock.FlockLocker{Dir: filepath.Join(configDir, "routerctl", "locks")}
-	return app.NewServiceWithLocker(registry, rd08v1196.NewProber(nil), locker)
+	return app.NewServiceWithLocker(registry, builtin.Discovery(), locker)
 }

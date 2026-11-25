@@ -1,4 +1,11 @@
-import type { HistoryEntry, HostKeyPrompt, OperationRequest, RouterAPI } from "./api";
+import type {
+  CatalogEntry,
+  HistoryEntry,
+  HostKeyPrompt,
+  OperationRequest,
+  Profile,
+  RouterAPI,
+} from "./api";
 
 declare global {
   interface Window {
@@ -30,6 +37,7 @@ export function createAPI(): RouterAPI {
       BackupVerify: (request) => app.BackupVerify(request),
       BackupVerifyOnline: (request) => app.BackupVerifyOnline(request),
       DeepPersist: (request) => app.DeepPersist(request),
+      Catalog: () => app.Catalog(),
       Cancel: (id) => app.Cancel(id),
       ListReports: () => app.ListReports(),
       ResolveHostKey: (id, accept) => app.ResolveHostKey(id, accept),
@@ -43,12 +51,50 @@ export function createAPI(): RouterAPI {
   return new Proxy({} as RouterAPI, { get: () => missing });
 }
 
+// Preview-only RD08 profile shaped like device.Profile; the catalog and preview reports share it.
+const previewProfile: Profile = {
+  id: "xiaomi-rd08-1.1.96",
+  model_id: "xiaomi-rd08",
+  vendor: "Xiaomi",
+  model: "BE6500 Pro",
+  hardware: "RD08",
+  firmware: "1.1.96",
+  capabilities: [
+    "doctor",
+    "web_auth",
+    "verify",
+    "enable_ssh",
+    "soft_persist",
+    "backup",
+    "deep_persist",
+  ],
+  deep: { acknowledgement: "RD08-DEEP", reboot_transitions: 3 },
+};
+
+const previewCatalog: CatalogEntry[] = [
+  {
+    model_id: "xiaomi-rd08",
+    vendor: "Xiaomi",
+    model: "BE6500 Pro",
+    hardware: "RD08",
+    profiles: [previewProfile],
+  },
+];
+
 // Preview-only identity and port evidence shaped like app.DoctorReport (labelled 模拟数据 in the UI).
 function previewDoctorFields(request: OperationRequest, failed: boolean) {
   if (failed) {
     return {
       device: { device_id: "", rom_version: "", new_encrypt_mode: 0 },
-      profile: { id: "", vendor: "", model: "", hardware: "", firmware: "", capabilities: null },
+      profile: {
+        id: "",
+        model_id: "",
+        vendor: "",
+        model: "",
+        hardware: "",
+        firmware: "",
+        capabilities: null,
+      },
       ssh: "",
       telnet: "",
       admin_auth: request.WithAdminAuth ? "failed" : "skipped",
@@ -63,22 +109,7 @@ function previewDoctorFields(request: OperationRequest, failed: boolean) {
       rom_version: "1.1.96",
       new_encrypt_mode: 1,
     },
-    profile: {
-      id: "xiaomi-rd08-1.1.96",
-      vendor: "Xiaomi",
-      model: "BE6500 Pro",
-      hardware: "RD08",
-      firmware: "1.1.96",
-      capabilities: [
-        "doctor",
-        "web_auth",
-        "verify",
-        "enable_ssh",
-        "soft_persist",
-        "backup",
-        "deep_persist",
-      ],
-    },
+    profile: previewProfile,
     ssh: "open",
     telnet: "closed",
     admin_auth: request.WithAdminAuth ? "verified" : "skipped",
@@ -185,6 +216,7 @@ function createMockAPI(): RouterAPI {
     BackupVerify: (request) => run("backup verify", request),
     BackupVerifyOnline: (request) => run("backup verify online", request),
     DeepPersist: (request) => run("deep-persist", request),
+    Catalog: async () => previewCatalog,
     Cancel: async () => true,
     ListReports: async () => [...history],
     ResolveHostKey: () => {},

@@ -76,6 +76,23 @@ func (f *fakeApplication) DeepPersist(_ context.Context, request app.DeepRequest
 	return app.DeepReport{Status: app.StatusSucceeded}, nil
 }
 
+func (f *fakeApplication) Catalog() []device.CatalogEntry {
+	return []device.CatalogEntry{{ModelID: "xiaomi-rd08", Profiles: []device.Profile{{ID: "xiaomi-rd08-1.1.96"}}}}
+}
+
+func TestCatalogPassesThroughWithoutHistory(t *testing.T) {
+	t.Parallel()
+
+	service := guiapi.New(&fakeApplication{}, nil, nil)
+	catalog := service.Catalog()
+	if len(catalog) != 1 || catalog[0].Profiles[0].ID != "xiaomi-rd08-1.1.96" {
+		t.Fatalf("Catalog() = %+v", catalog)
+	}
+	if len(service.ListReports()) != 0 {
+		t.Fatal("Catalog() recorded a history entry")
+	}
+}
+
 type eventRecorder struct {
 	mu       sync.Mutex
 	ids      []string

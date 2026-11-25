@@ -64,8 +64,11 @@ func (s *Service) DeepPersist(ctx context.Context, request DeepRequest, events E
 	if !request.AllowTelnet {
 		return fail(&device.Error{Code: device.CodeDeepAckRequired, Message: "deep persistence requires explicit Telnet permission"})
 	}
-	if request.AckDeep != "RD08-DEEP" {
-		return fail(&device.Error{Code: device.CodeDeepAckRequired, Message: "deep persistence requires the exact RD08-DEEP acknowledgement"})
+	if err := s.checkProfileID(request.ProfileID); err != nil {
+		return fail(err)
+	}
+	if err := s.checkDeepAcknowledgement(request.ProfileID, request.AckDeep); err != nil {
+		return fail(err)
 	}
 	if request.BackupDir == "" {
 		return fail(&device.Error{Code: device.CodeBackupMissing, Message: "a verified backup directory is required"})
@@ -82,16 +85,19 @@ func (s *Service) DeepPersist(ctx context.Context, request DeepRequest, events E
 		return fail(err)
 	}
 	defer func() { _ = release() }()
-	driver, probe, err := s.resolveOperationTarget(ctx, request.Target, request.ProfileID)
+	adapter, probe, err := s.resolveOperationTarget(ctx, request.Target, request.ProfileID)
 	if err != nil {
 		return fail(err)
 	}
 	report.Device = probe.Observation
-	report.Profile = driver.Profile()
+	report.Profile = adapter.Profile()
 	if !report.Profile.Supports(device.CapabilityDeepPersist) {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected profile does not support deep persistence"})
 	}
-	persister, ok := s.prober.(DeepPersister)
+	if report.Profile.Deep == nil || request.AckDeep != report.Profile.Deep.Acknowledgement {
+		return fail(&device.Error{Code: device.CodeDeepAckRequired, Message: "deep persistence requires the exact acknowledgement of the resolved profile"})
+	}
+	persister, ok := adapter.Operations.(DeepPersister)
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "deep persistence is unavailable"})
 	}
@@ -145,7 +151,7 @@ func (s *Service) DeepPersist(ctx context.Context, request DeepRequest, events E
 		}
 		return fail(err)
 	}
-	if len(result.Transitions) != 3 || !result.FinalSSHVerified || !result.SoftVerified {
+	if len(result.Transitions) != report.Profile.Deep.RebootTransitions || !result.FinalSSHVerified || !result.SoftVerified {
 		report.Status = StatusPartial
 		_ = journal.Stage("FAILED")
 		return fail(&device.Error{Code: device.CodeRootVerifyFailed, Message: "deep-persist final evidence is incomplete"})
@@ -153,6 +159,34 @@ func (s *Service) DeepPersist(ctx context.Context, request DeepRequest, events E
 	report.Status = StatusSucceeded
 	emit("completed", StatusSucceeded)
 	return report, nil
+}
+
+// checkDeepAcknowledgement runs before any network access. An explicit profile must declare deep
+// persistence and the phrase must be its own; with auto the phrase must belong to some registered deep
+// profile, and the resolved profile's own phrase is checked again before any journal or adapter call.
+func (s *Service) checkDeepAcknowledgement(profileID, acknowledgement string) error {
+	if profileID != "" && profileID != "auto" {
+		adapter, ok := s.registry.Lookup(profileID)
+		if !ok {
+			return &device.Error{Code: device.CodeUnsupportedProfile, Message: "the requested profile is not registered; list profiles with routerctl profiles"}
+		}
+		profile := adapter.Profile()
+		if !profile.Supports(device.CapabilityDeepPersist) || profile.Deep == nil {
+			return &device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected profile does not support deep persistence"}
+		}
+		if acknowledgement != profile.Deep.Acknowledgement {
+			return &device.Error{Code: device.CodeDeepAckRequired, Message: "deep persistence requires the exact acknowledgement of the selected profile"}
+		}
+		return nil
+	}
+	for _, entry := range s.registry.Catalog() {
+		for _, profile := range entry.Profiles {
+			if profile.Deep != nil && acknowledgement != "" && acknowledgement == profile.Deep.Acknowledgement {
+				return nil
+			}
+		}
+	}
+	return &device.Error{Code: device.CodeDeepAckRequired, Message: "deep persistence requires the exact acknowledgement of the device profile"}
 }
 
 var deepHostUnsafe = regexp.MustCompile(`[^a-zA-Z0-9._-]`)

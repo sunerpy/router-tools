@@ -29,13 +29,12 @@ func TestBackupVerifyOnlineFailureIsRedacted(t *testing.T) {
 		profile: device.Profile{ID: "test", Hardware: "RD08", Capabilities: []device.Capability{device.CapabilityBackup}},
 		match:   device.MatchResult{Level: device.ExactMatch},
 	}
-	registry, _ := device.NewRegistry(driver)
 	verifierErr := &device.Error{Code: device.CodeBackupLayoutMismatch, Message: "layout differs after login with root-secret"}
 	prober := &onlineBackupProber{
 		fakeProber: fakeProber{result: device.ProbeResult{Observation: device.Observation{Hardware: "RD08", ROMVersion: "1.1.96"}}},
 		err:        verifierErr,
 	}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 	password, _ := secret.NewPassword("root-secret")
 
 	report, err := service.BackupVerifyOnline(t.Context(), app.BackupOnlineVerifyRequest{
@@ -82,20 +81,20 @@ func TestRootPasswordFailuresAreRedacted(t *testing.T) {
 	observation := device.ProbeResult{Observation: device.Observation{Hardware: "RD08", ROMVersion: "1.1.96"}}
 	cases := map[string]func(t *testing.T, adapterErr *device.Error) (any, error){
 		"reboot-verify": func(t *testing.T, adapterErr *device.Error) (any, error) {
-			registry, _ := device.NewRegistry(fakeDriver{
+			adapterProber := &rebootRedactionProber{fakeProber: fakeProber{result: observation}, err: adapterErr}
+			service, _ := app.NewService(newTestRegistry(t, fakeDriver{
 				profile: device.Profile{ID: "test", Capabilities: []device.Capability{device.CapabilitySoftPersist}},
 				match:   device.MatchResult{Level: device.ExactMatch},
-			})
-			service, _ := app.NewService(registry, &rebootRedactionProber{fakeProber: fakeProber{result: observation}, err: adapterErr})
+			}, adapterProber), adapterProber)
 			password, _ := secret.NewPassword("root-secret")
 			return service.RebootVerify(t.Context(), app.SoftRequest{Target: device.DefaultTarget(), RootPassword: password, Confirmed: true}, nil)
 		},
 		"backup-create": func(t *testing.T, adapterErr *device.Error) (any, error) {
-			registry, _ := device.NewRegistry(fakeDriver{
+			adapterProber := &backupCreateRedactionProber{fakeProber: fakeProber{result: observation}, err: adapterErr}
+			service, _ := app.NewService(newTestRegistry(t, fakeDriver{
 				profile: device.Profile{ID: "test", Capabilities: []device.Capability{device.CapabilityBackup}},
 				match:   device.MatchResult{Level: device.ExactMatch},
-			})
-			service, _ := app.NewService(registry, &backupCreateRedactionProber{fakeProber: fakeProber{result: observation}, err: adapterErr})
+			}, adapterProber), adapterProber)
 			password, _ := secret.NewPassword("root-secret")
 			return service.BackupCreate(t.Context(), app.BackupCreateRequest{Target: device.DefaultTarget(), RootPassword: password, OutputDir: t.TempDir() + "/new"}, nil)
 		},

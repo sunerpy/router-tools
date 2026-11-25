@@ -48,4 +48,17 @@ func TestDriverProfile(t *testing.T) {
 	if !profile.Supports(device.CapabilityWebAuth) {
 		t.Fatal("RD08 profile does not advertise Web authentication")
 	}
+	if profile.ModelID != "xiaomi-rd08" || profile.ID != profile.ModelID+"-"+profile.Firmware {
+		t.Fatalf("Profile() model ID = %q, ID = %q", profile.ModelID, profile.ID)
+	}
+	if profile.Deep == nil || profile.Deep.Acknowledgement != "RD08-DEEP" || profile.Deep.RebootTransitions != 3 {
+		t.Fatalf("Profile().Deep = %+v, want RD08-DEEP with three reboots", profile.Deep)
+	}
+	adapter := rd08v1196.Adapter()
+	if adapter.Operations == nil || adapter.Profile().ID != profile.ID {
+		t.Fatalf("Adapter() = %+v", adapter)
+	}
+	if _, err := device.NewRegistry(adapter); err != nil {
+		t.Fatalf("NewRegistry(Adapter()) error = %v", err)
+	}
 }

@@ -8,6 +8,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/sunerpy/router-tools/internal/app"
+	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/guiapi"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 )
@@ -71,6 +72,10 @@ func (a *App) BackupVerifyOnline(request guiapi.OperationRequest) (app.BackupVer
 func (a *App) DeepPersist(request guiapi.OperationRequest) (app.DeepReport, error) {
 	return a.service.DeepPersist(a.ctx, request)
 }
+
+// Catalog lists the registered device models and their exact firmware profiles.
+func (a *App) Catalog() []device.CatalogEntry { return a.service.Catalog() }
+
 func (a *App) Cancel(operationID string) bool              { return a.service.Cancel(operationID) }
 func (a *App) ListReports() []guiapi.HistoryEntry          { return a.service.ListReports() }
 func (a *App) NewOperationID() (string, error)             { return guiapi.NewOperationID() }
