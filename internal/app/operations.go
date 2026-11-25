@@ -89,21 +89,24 @@ func (s *Service) softOperation(ctx context.Context, request SoftRequest, events
 	if err := validateSoftRequest(request); err != nil {
 		return fail(err)
 	}
+	if err := s.checkProfileID(request.ProfileID); err != nil {
+		return fail(err)
+	}
 	release, err := s.locker.Acquire(request.Target)
 	if err != nil {
 		return fail(err)
 	}
 	defer func() { _ = release() }()
-	driver, probe, err := s.resolveOperationTarget(ctx, request.Target, request.ProfileID)
+	adapter, probe, err := s.resolveOperationTarget(ctx, request.Target, request.ProfileID)
 	if err != nil {
 		return fail(err)
 	}
 	report.Device = probe.Observation
-	report.Profile = driver.Profile()
+	report.Profile = adapter.Profile()
 	if !report.Profile.Supports(device.CapabilitySoftPersist) {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected profile does not support soft persistence"})
 	}
-	provider, ok := s.prober.(SoftPersistence)
+	provider, ok := adapter.Operations.(SoftPersistence)
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "soft persistence is unavailable"})
 	}
@@ -142,21 +145,24 @@ func (s *Service) RebootVerify(ctx context.Context, request SoftRequest, events 
 	if err := validateSoftRequest(request); err != nil {
 		return fail(err)
 	}
+	if err := s.checkProfileID(request.ProfileID); err != nil {
+		return fail(err)
+	}
 	release, err := s.locker.Acquire(request.Target)
 	if err != nil {
 		return fail(err)
 	}
 	defer func() { _ = release() }()
-	driver, probe, err := s.resolveOperationTarget(ctx, request.Target, request.ProfileID)
+	adapter, probe, err := s.resolveOperationTarget(ctx, request.Target, request.ProfileID)
 	if err != nil {
 		return fail(err)
 	}
 	report.Device = probe.Observation
-	report.Profile = driver.Profile()
+	report.Profile = adapter.Profile()
 	if !report.Profile.Supports(device.CapabilitySoftPersist) {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected profile does not support reboot verification"})
 	}
-	verifier, ok := s.prober.(RebootVerifier)
+	verifier, ok := adapter.Operations.(RebootVerifier)
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "reboot verification is unavailable"})
 	}
@@ -219,21 +225,24 @@ func (s *Service) BackupCreate(ctx context.Context, request BackupCreateRequest,
 	if request.OutputDir == "" {
 		return fail(&device.Error{Code: device.CodeInvalidArgument, Message: "backup output directory is required"})
 	}
+	if err := s.checkProfileID(request.ProfileID); err != nil {
+		return fail(err)
+	}
 	release, err := s.locker.Acquire(request.Target)
 	if err != nil {
 		return fail(err)
 	}
 	defer func() { _ = release() }()
-	driver, probe, err := s.resolveOperationTarget(ctx, request.Target, request.ProfileID)
+	adapter, probe, err := s.resolveOperationTarget(ctx, request.Target, request.ProfileID)
 	if err != nil {
 		return fail(err)
 	}
 	report.Device = probe.Observation
-	report.Profile = driver.Profile()
+	report.Profile = adapter.Profile()
 	if !report.Profile.Supports(device.CapabilityBackup) {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected profile does not support backup"})
 	}
-	creator, ok := s.prober.(BackupCreator)
+	creator, ok := adapter.Operations.(BackupCreator)
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "backup is unavailable"})
 	}
@@ -313,11 +322,11 @@ func validateSoftRequest(request SoftRequest) error {
 	return nil
 }
 
-func (s *Service) resolveOperationTarget(ctx context.Context, target device.Target, profileID string) (device.Driver, device.ProbeResult, error) {
-	probe, err := s.prober.Probe(ctx, target)
+func (s *Service) resolveOperationTarget(ctx context.Context, target device.Target, profileID string) (device.Adapter, device.ProbeResult, error) {
+	probe, err := s.discovery.Probe(ctx, target)
 	if err != nil {
-		return nil, device.ProbeResult{}, err
+		return device.Adapter{}, device.ProbeResult{}, err
 	}
-	driver, err := s.resolveProfile(profileID, probe.Observation)
-	return driver, probe, err
+	adapter, err := s.resolveProfile(profileID, probe.Observation)
+	return adapter, probe, err
 }

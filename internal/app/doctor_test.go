@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sunerpy/router-tools/internal/app"
@@ -44,16 +45,12 @@ func TestDoctorSucceedsThroughFrontendIndependentService(t *testing.T) {
 		profile: device.Profile{ID: "test-rd08-1.1.96", Capabilities: []device.Capability{device.CapabilityDoctor}},
 		match:   device.MatchResult{Level: device.ExactMatch},
 	}
-	registry, err := device.NewRegistry(driver)
-	if err != nil {
-		t.Fatalf("NewRegistry() error = %v", err)
-	}
 	prober := &fakeProber{result: device.ProbeResult{
 		Observation: device.Observation{Hardware: "RD08", ROMVersion: "1.1.96"},
 		SSH:         device.PortOpen,
 		Telnet:      device.PortClosed,
 	}}
-	service, err := app.NewService(registry, prober)
+	service, err := app.NewService(newTestRegistry(t, driver, prober), prober)
 	if err != nil {
 		t.Fatalf("NewService() error = %v", err)
 	}
@@ -87,9 +84,8 @@ func TestDoctorFailsClosedAndReportsStableError(t *testing.T) {
 		profile: device.Profile{ID: "test-rd08-1.1.96"},
 		match:   device.MatchResult{Level: device.DeviceMatch},
 	}
-	registry, _ := device.NewRegistry(driver)
 	prober := &fakeProber{result: device.ProbeResult{Observation: device.Observation{Hardware: "RD08", ROMVersion: "9.9.9"}}}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 
 	report, err := service.Doctor(t.Context(), app.DoctorRequest{
 		Target: device.Target{Host: "192.168.31.1", WebPort: 80, SSHPort: 22, TelnetPort: 23},
@@ -106,9 +102,8 @@ func TestDoctorFailsClosedAndReportsStableError(t *testing.T) {
 func TestDoctorRejectsInvalidTargetBeforeNetworkAccess(t *testing.T) {
 	t.Parallel()
 
-	registry, _ := device.NewRegistry(fakeDriver{profile: device.Profile{ID: "test"}})
 	prober := &fakeProber{}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, fakeDriver{profile: device.Profile{ID: "test"}}, prober), prober)
 
 	_, err := service.Doctor(t.Context(), app.DoctorRequest{}, nil)
 	assertCode(t, err, device.CodeInvalidArgument)
@@ -120,9 +115,8 @@ func TestDoctorRejectsInvalidTargetBeforeNetworkAccess(t *testing.T) {
 func TestDoctorPreservesProbeErrorCode(t *testing.T) {
 	t.Parallel()
 
-	registry, _ := device.NewRegistry(fakeDriver{profile: device.Profile{ID: "test"}})
 	prober := &fakeProber{err: &device.Error{Code: device.CodeWebProtocolError, Message: "invalid response"}}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, fakeDriver{profile: device.Profile{ID: "test"}}, prober), prober)
 
 	report, err := service.Doctor(t.Context(), app.DoctorRequest{
 		Target: device.Target{Host: "router.local", WebPort: 80, SSHPort: 22, TelnetPort: 23},
@@ -136,9 +130,8 @@ func TestDoctorPreservesProbeErrorCode(t *testing.T) {
 func TestDoctorPreservesCancellation(t *testing.T) {
 	t.Parallel()
 
-	registry, _ := device.NewRegistry(fakeDriver{profile: device.Profile{ID: "test"}})
 	prober := &fakeProber{err: context.Canceled}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, fakeDriver{profile: device.Profile{ID: "test"}}, prober), prober)
 
 	report, err := service.Doctor(t.Context(), app.DoctorRequest{
 		Target: device.Target{Host: "router.local", WebPort: 80, SSHPort: 22, TelnetPort: 23},
@@ -164,4 +157,25 @@ func assertCode(t *testing.T, err error, want string) {
 	if deviceErr.Code != want {
 		t.Fatalf("error code = %q, want %q", deviceErr.Code, want)
 	}
+}
+
+// newTestRegistry registers one fake driver served by operations; single-adapter tests also pass the same
+// object to the service as its discovery prober, as they did before per-profile dispatch. Fixture IDs that
+// are not already "model-firmware" are completed with firmware "1".
+func newTestRegistry(t *testing.T, driver fakeDriver, operations any) *device.Registry {
+	t.Helper()
+	p := driver.profile
+	if p.ModelID == "" {
+		if i := strings.LastIndex(p.ID, "-"); i > 0 {
+			p.ModelID, p.Firmware = p.ID[:i], p.ID[i+1:]
+		} else {
+			p.ModelID, p.Firmware, p.ID = p.ID, "1", p.ID+"-1"
+		}
+	}
+	driver.profile = p
+	registry, err := device.NewRegistry(device.Adapter{Driver: driver, Operations: operations})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	return registry
 }

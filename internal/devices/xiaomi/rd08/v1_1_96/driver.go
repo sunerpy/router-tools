@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	profileID = "xiaomi-rd08-1.1.96"
+	modelID   = "xiaomi-rd08"
 	firmware  = "1.1.96"
+	profileID = modelID + "-" + firmware
 )
 
 // Driver implements RD08 1.1.96 compatibility policy.
@@ -22,6 +23,7 @@ func New() *Driver { return &Driver{} }
 func (d *Driver) Profile() device.Profile {
 	return device.Profile{
 		ID:       profileID,
+		ModelID:  modelID,
 		Vendor:   "Xiaomi",
 		Model:    "BE6500 Pro",
 		Hardware: "RD08",
@@ -35,6 +37,7 @@ func (d *Driver) Profile() device.Profile {
 			device.CapabilityBackup,
 			device.CapabilityDeepPersist,
 		},
+		Deep: &device.DeepPolicy{Acknowledgement: "RD08-DEEP", RebootTransitions: 3},
 	}
 }
 

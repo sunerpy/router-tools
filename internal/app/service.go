@@ -45,11 +45,12 @@ type AdminVerifier interface {
 	VerifyAdmin(ctx context.Context, target device.Target, password secret.Password) error
 }
 
-// Service owns application flow while protocols remain behind interfaces.
+// Service owns application flow while protocols remain behind interfaces. The discovery prober only
+// identifies devices; every capability is served by the resolved adapter's own implementation.
 type Service struct {
-	registry *device.Registry
-	prober   device.Prober
-	locker   OperationLocker
+	registry  *device.Registry
+	discovery device.Prober
+	locker    OperationLocker
 }
 
 // NewService wires frontend-independent dependencies.
@@ -57,7 +58,8 @@ func NewService(registry *device.Registry, prober device.Prober) (*Service, erro
 	return NewServiceWithLocker(registry, prober, nil)
 }
 
-// NewServiceWithLocker wires a cross-process locker in production.
+// NewServiceWithLocker wires a cross-process locker in production. prober is the discovery prober: it is
+// only asked to Probe, never type-asserted for capabilities.
 func NewServiceWithLocker(registry *device.Registry, prober device.Prober, locker OperationLocker) (*Service, error) {
 	if registry == nil || prober == nil {
 		return nil, fmt.Errorf("app service requires a registry and prober")
@@ -65,7 +67,23 @@ func NewServiceWithLocker(registry *device.Registry, prober device.Prober, locke
 	if locker == nil {
 		locker = newLocalLocker()
 	}
-	return &Service{registry: registry, prober: prober, locker: locker}, nil
+	return &Service{registry: registry, discovery: prober, locker: locker}, nil
+}
+
+// Catalog lists the registered device models and their exact firmware profiles. It needs no network.
+func (s *Service) Catalog() []device.CatalogEntry {
+	return s.registry.Catalog()
+}
+
+// checkProfileID rejects an unregistered explicit profile before any lock or network access.
+func (s *Service) checkProfileID(profileID string) error {
+	if profileID == "" || profileID == "auto" {
+		return nil
+	}
+	if _, ok := s.registry.Lookup(profileID); !ok {
+		return &device.Error{Code: device.CodeUnsupportedProfile, Message: "the requested profile is not registered; list profiles with routerctl profiles"}
+	}
+	return nil
 }
 
 // DoctorRequest controls a read-only preflight.
@@ -83,23 +101,24 @@ type DoctorRequest struct {
 
 // DoctorReport is the stable result rendered by CLI and future GUI clients.
 type DoctorReport struct {
-	SchemaVersion      int                `json:"schema_version"`
-	Operation          string             `json:"operation"`
-	Status             string             `json:"status"`
-	Host               string             `json:"host"`
-	Device             device.Observation `json:"device"`
-	Profile            device.Profile     `json:"profile"`
-	Compatible         bool               `json:"compatible"`
-	SSH                device.PortState   `json:"ssh"`
-	Telnet             device.PortState   `json:"telnet"`
-	AdminAuth          string             `json:"admin_auth"`
-	RootVerify         string             `json:"root_verify"`
-	Transport          string             `json:"transport,omitempty"`
-	SSHVerified        bool               `json:"ssh_verified"`
-	TelnetRootVerified bool               `json:"telnet_root_verified"`
-	BootID             string             `json:"boot_id,omitempty"`
-	NextSteps          []string           `json:"next_steps,omitempty"`
-	Error              *device.Error      `json:"error,omitempty"`
+	SchemaVersion      int                   `json:"schema_version"`
+	Operation          string                `json:"operation"`
+	Status             string                `json:"status"`
+	Host               string                `json:"host"`
+	Device             device.Observation    `json:"device"`
+	Profile            device.Profile        `json:"profile"`
+	Candidates         []device.ProfileMatch `json:"candidates,omitempty"`
+	Compatible         bool                  `json:"compatible"`
+	SSH                device.PortState      `json:"ssh"`
+	Telnet             device.PortState      `json:"telnet"`
+	AdminAuth          string                `json:"admin_auth"`
+	RootVerify         string                `json:"root_verify"`
+	Transport          string                `json:"transport,omitempty"`
+	SSHVerified        bool                  `json:"ssh_verified"`
+	TelnetRootVerified bool                  `json:"telnet_root_verified"`
+	BootID             string                `json:"boot_id,omitempty"`
+	NextSteps          []string              `json:"next_steps,omitempty"`
+	Error              *device.Error         `json:"error,omitempty"`
 }
 
 // Doctor executes no device writes. Open ports are never reported as authenticated shells.
@@ -160,6 +179,9 @@ func (s *Service) Doctor(ctx context.Context, request DoctorRequest, events Even
 	if err := request.Target.Validate(); err != nil {
 		return fail(err)
 	}
+	if err := s.checkProfileID(request.ProfileID); err != nil {
+		return fail(err)
+	}
 	if request.WithAdminAuth {
 		if err := request.AdminPassword.Validate(); err != nil {
 			return fail(err)
@@ -174,7 +196,7 @@ func (s *Service) Doctor(ctx context.Context, request DoctorRequest, events Even
 		}
 	}
 	emit("probe", "running")
-	probe, err := s.prober.Probe(ctx, request.Target)
+	probe, err := s.discovery.Probe(ctx, request.Target)
 	if err != nil {
 		return fail(err)
 	}
@@ -183,23 +205,19 @@ func (s *Service) Doctor(ctx context.Context, request DoctorRequest, events Even
 	report.Telnet = probe.Telnet
 
 	emit("compatibility", "running")
-	var driver device.Driver
-	if request.ProfileID != "" && request.ProfileID != "auto" {
-		driver, err = s.registry.ResolveProfile(request.ProfileID, probe.Observation)
-	} else {
-		driver, err = s.registry.Resolve(probe.Observation)
-	}
+	adapter, err := s.resolveProfile(request.ProfileID, probe.Observation)
 	if err != nil {
+		report.Candidates = s.registry.Candidates(probe.Observation)
 		return fail(err)
 	}
-	report.Profile = driver.Profile()
+	report.Profile = adapter.Profile()
 	report.Compatible = true
 	if request.WithAdminAuth {
 		emit("admin_auth", "running")
 		if !report.Profile.Supports(device.CapabilityWebAuth) {
 			return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected profile does not support Web authentication"})
 		}
-		verifier, ok := s.prober.(AdminVerifier)
+		verifier, ok := adapter.Operations.(AdminVerifier)
 		if !ok {
 			return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected prober does not support Web authentication"})
 		}
@@ -213,7 +231,7 @@ func (s *Service) Doctor(ctx context.Context, request DoctorRequest, events Even
 		if !report.Profile.Supports(device.CapabilityVerify) {
 			return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected profile does not support root verification"})
 		}
-		verifier, ok := s.prober.(RootVerifier)
+		verifier, ok := adapter.Operations.(RootVerifier)
 		if !ok {
 			return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "root verification is unavailable"})
 		}

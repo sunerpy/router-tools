@@ -53,6 +53,25 @@ describe("preview API", () => {
     expect(report.ssh_verified).toBe(false);
   });
 
+  it("lists the registered device catalog like the Go Catalog binding", async () => {
+    const api = createAPI();
+    const catalog = await api.Catalog();
+    expect(catalog).toHaveLength(1);
+    expect(catalog[0]).toMatchObject({
+      model_id: "xiaomi-rd08",
+      vendor: "Xiaomi",
+      model: "BE6500 Pro",
+      hardware: "RD08",
+    });
+    expect(catalog[0].profiles.map((profile) => profile.id)).toEqual(["xiaomi-rd08-1.1.96"]);
+    expect(catalog[0].profiles[0].deep).toEqual({
+      acknowledgement: "RD08-DEEP",
+      reboot_transitions: 3,
+    });
+    const report = await api.Doctor(makeRequest());
+    expect(report.profile).toEqual(catalog[0].profiles[0]);
+  });
+
   it("keeps the success scenario as the default", async () => {
     const api = createAPI();
     const report = await api.Doctor(makeRequest());

@@ -28,12 +28,11 @@ func TestVerifySSHRoot(t *testing.T) {
 	t.Parallel()
 
 	driver := fakeDriver{profile: device.Profile{ID: "test", Capabilities: []device.Capability{device.CapabilityVerify}}, match: device.MatchResult{Level: device.ExactMatch}}
-	registry, _ := device.NewRegistry(driver)
 	prober := &rootProber{
 		fakeProber: fakeProber{result: device.ProbeResult{Observation: device.Observation{Hardware: "RD08", ROMVersion: "1.1.96"}}},
 		result:     app.RootVerification{Transport: "ssh", RootVerified: true, BootID: "00000000-0000-0000-0000-000000000001"},
 	}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 	password, _ := secret.NewPassword("root-password")
 
 	report, err := service.Verify(t.Context(), app.VerifyRequest{
@@ -56,9 +55,8 @@ func TestVerifyTelnetDoesNotProveSSH(t *testing.T) {
 	t.Parallel()
 
 	driver := fakeDriver{profile: device.Profile{ID: "test", Capabilities: []device.Capability{device.CapabilityVerify}}, match: device.MatchResult{Level: device.ExactMatch}}
-	registry, _ := device.NewRegistry(driver)
 	prober := &rootProber{result: app.RootVerification{Transport: "telnet", RootVerified: true}}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 	password, _ := secret.NewPassword("root-password")
 
 	report, err := service.Verify(t.Context(), app.VerifyRequest{
@@ -79,9 +77,8 @@ func TestDoctorWithRootVerify(t *testing.T) {
 	t.Parallel()
 
 	driver := fakeDriver{profile: device.Profile{ID: "test", Capabilities: []device.Capability{device.CapabilityVerify}}, match: device.MatchResult{Level: device.ExactMatch}}
-	registry, _ := device.NewRegistry(driver)
 	prober := &rootProber{result: app.RootVerification{Transport: "ssh", RootVerified: true, BootID: "00000000-0000-0000-0000-000000000001"}}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 	password, _ := secret.NewPassword("root")
 	report, err := service.Doctor(t.Context(), app.DoctorRequest{
 		Target: device.DefaultTarget(), WithRootVerify: true, RootPassword: password, Transport: "ssh",
@@ -97,9 +94,8 @@ func TestDoctorWithRootVerify(t *testing.T) {
 func TestVerifyRejectsPasswordBeforeNetworkAccess(t *testing.T) {
 	t.Parallel()
 
-	registry, _ := device.NewRegistry(fakeDriver{profile: device.Profile{ID: "test"}})
 	prober := &rootProber{}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, fakeDriver{profile: device.Profile{ID: "test"}}, prober), prober)
 	_, err := service.Verify(t.Context(), app.VerifyRequest{
 		Target: device.Target{Host: "router.local", WebPort: 80, SSHPort: 22, TelnetPort: 23},
 	}, nil)

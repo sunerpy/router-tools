@@ -14,6 +14,7 @@ function makeAPI(): RouterAPI {
     BackupVerify: vi.fn().mockResolvedValue({ status: "succeeded", valid: true }),
     BackupVerifyOnline: vi.fn().mockResolvedValue({ status: "succeeded", valid: true }),
     DeepPersist: vi.fn().mockResolvedValue({ status: "succeeded" }),
+    Catalog: vi.fn().mockResolvedValue([]),
     Cancel: vi.fn().mockResolvedValue(true),
     ListReports: vi.fn().mockResolvedValue([]),
     ResolveHostKey: vi.fn(),

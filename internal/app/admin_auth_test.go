@@ -34,11 +34,10 @@ func TestDoctorWithAdminAuthVerifiesWithoutReportingToken(t *testing.T) {
 		},
 		match: device.MatchResult{Level: device.ExactMatch},
 	}
-	registry, _ := device.NewRegistry(driver)
 	prober := &adminProber{fakeProber: fakeProber{result: device.ProbeResult{
 		Observation: device.Observation{Hardware: "RD08", ROMVersion: "1.1.96"},
 	}}}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 	password, _ := secret.NewPassword(" admin-password ")
 	events := &eventRecorder{}
 
@@ -78,7 +77,6 @@ func TestDoctorAdminAuthFailureIsRedacted(t *testing.T) {
 		profile: device.Profile{ID: "test", Capabilities: []device.Capability{device.CapabilityWebAuth}},
 		match:   device.MatchResult{Level: device.ExactMatch},
 	}
-	registry, _ := device.NewRegistry(driver)
 	prober := &adminProber{
 		fakeProber: fakeProber{result: device.ProbeResult{Observation: device.Observation{Hardware: "RD08"}}},
 		verifyErr: &device.Error{
@@ -86,7 +84,7 @@ func TestDoctorAdminAuthFailureIsRedacted(t *testing.T) {
 			Message: "password admin-secret failed at ;stok=token-secret/api",
 		},
 	}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 	password, _ := secret.NewPassword("admin-secret")
 
 	report, err := service.Doctor(t.Context(), app.DoctorRequest{
@@ -115,9 +113,8 @@ func TestDoctorAdminAuthRejectsMissingCapability(t *testing.T) {
 		profile: device.Profile{ID: "test", Capabilities: []device.Capability{device.CapabilityDoctor}},
 		match:   device.MatchResult{Level: device.ExactMatch},
 	}
-	registry, _ := device.NewRegistry(driver)
 	prober := &adminProber{fakeProber: fakeProber{result: device.ProbeResult{Observation: device.Observation{Hardware: "RD08"}}}}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 	password, _ := secret.NewPassword("admin")
 
 	report, err := service.Doctor(t.Context(), app.DoctorRequest{
@@ -137,9 +134,8 @@ func TestDoctorAdminAuthRejectsMissingCapability(t *testing.T) {
 func TestDoctorAdminPasswordIsValidatedBeforeNetworkAccess(t *testing.T) {
 	t.Parallel()
 
-	registry, _ := device.NewRegistry(fakeDriver{profile: device.Profile{ID: "test"}})
 	prober := &adminProber{}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, fakeDriver{profile: device.Profile{ID: "test"}}, prober), prober)
 
 	_, err := service.Doctor(t.Context(), app.DoctorRequest{
 		Target:        device.Target{Host: "router.local", WebPort: 80, SSHPort: 22, TelnetPort: 23},

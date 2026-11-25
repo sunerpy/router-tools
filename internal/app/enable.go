@@ -101,27 +101,30 @@ func (s *Service) EnableSSH(ctx context.Context, request EnableRequest, events E
 	if !request.Confirmed {
 		return fail(&device.Error{Code: device.CodeConfirmationRequired, Message: "enable requires explicit confirmation"})
 	}
+	if err := s.checkProfileID(request.ProfileID); err != nil {
+		return fail(err)
+	}
 	release, err := s.locker.Acquire(request.Target)
 	if err != nil {
 		return fail(err)
 	}
 	defer func() { _ = release() }()
 	emit("probe", "running")
-	probe, err := s.prober.Probe(ctx, request.Target)
+	probe, err := s.discovery.Probe(ctx, request.Target)
 	if err != nil {
 		return fail(err)
 	}
 	report.Device = probe.Observation
 	emit("compatibility", "running")
-	driver, err := s.resolveProfile(request.ProfileID, probe.Observation)
+	adapter, err := s.resolveProfile(request.ProfileID, probe.Observation)
 	if err != nil {
 		return fail(err)
 	}
-	report.Profile = driver.Profile()
+	report.Profile = adapter.Profile()
 	if !report.Profile.Supports(device.CapabilityEnableSSH) {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected profile does not support SSH enable"})
 	}
-	enabler, ok := s.prober.(SSHEnabler)
+	enabler, ok := adapter.Operations.(SSHEnabler)
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected prober does not support SSH enable"})
 	}

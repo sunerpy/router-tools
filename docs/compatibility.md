@@ -11,7 +11,7 @@
 | Management         | HTTP 80, SSH 22, Telnet 23                                  |
 | Real-device status | **Not verified on hardware in this repository's test runs** |
 
-No other model or firmware is accepted automatically. There is no `--force` compatibility bypass.
+No other model or firmware is accepted automatically. There is no `--force` compatibility bypass. `routerctl profiles` (and the GUI `Catalog()` binding) list the registered profiles; registered means implemented and tested offline, not verified on hardware, which this table records separately.
 
 ## Offline evidence
 

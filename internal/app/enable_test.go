@@ -25,9 +25,8 @@ func (p *enableProber) EnableSSH(context.Context, device.Target, secret.Password
 func TestEnableRequiresConfirmationBeforeNetworkAccess(t *testing.T) {
 	t.Parallel()
 
-	registry, _ := device.NewRegistry(fakeDriver{profile: device.Profile{ID: "test"}})
 	prober := &enableProber{}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, fakeDriver{profile: device.Profile{ID: "test"}}, prober), prober)
 	admin, _ := secret.NewPassword("admin")
 	root, _ := secret.NewPassword("root")
 	_, err := service.EnableSSH(t.Context(), app.EnableRequest{
@@ -43,10 +42,9 @@ func TestEnableReturnsPartialReport(t *testing.T) {
 	t.Parallel()
 
 	driver := fakeDriver{profile: device.Profile{ID: "test", Capabilities: []device.Capability{device.CapabilityEnableSSH}}, match: device.MatchResult{Level: device.ExactMatch}}
-	registry, _ := device.NewRegistry(driver)
 	operationErr := &device.Error{Code: device.CodeMACCleanupFailed, Message: "cleanup failed"}
 	prober := &enableProber{result: app.EnableResult{Status: app.StatusPartial, AcceptedSteps: 3, SSHVerified: true}, err: operationErr}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 	admin, _ := secret.NewPassword("admin")
 	root, _ := secret.NewPassword("root")
 	report, err := service.EnableSSH(t.Context(), app.EnableRequest{

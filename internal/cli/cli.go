@@ -26,6 +26,11 @@ type DoctorService interface {
 	Doctor(context.Context, app.DoctorRequest, app.EventSink) (app.DoctorReport, error)
 }
 
+// CatalogService lists registered device models and their exact firmware profiles without network access.
+type CatalogService interface {
+	Catalog() []device.CatalogEntry
+}
+
 // VerifyService is the application boundary for root shell verification.
 type VerifyService interface {
 	Verify(context.Context, app.VerifyRequest, app.EventSink) (app.VerifyReport, error)
@@ -89,7 +94,7 @@ func ExecuteWithInput(
 	flags.IntVar(&target.WebPort, "web-port", target.WebPort, "router Web HTTP port")
 	flags.IntVar(&target.SSHPort, "ssh-port", target.SSHPort, "router SSH port")
 	flags.IntVar(&target.TelnetPort, "telnet-port", target.TelnetPort, "router Telnet port")
-	flags.StringVar(&profileID, "profile", profileID, "exact device profile ID or auto")
+	flags.StringVar(&profileID, "profile", profileID, "exact device profile ID from 'routerctl profiles', or auto")
 	flags.BoolVar(&jsonOutput, "json", false, "write one JSON result object to stdout")
 	flags.BoolVar(&nonInteractive, "non-interactive", false, "disable interactive prompts")
 	flags.BoolVar(&adminPasswordStdin, "admin-password-stdin", false, "read the Web admin password from stdin")
@@ -102,6 +107,19 @@ func ExecuteWithInput(
 	flags.StringVar(&runDir, "run-dir", runDir, "operation report and journal directory")
 	flags.BoolVar(&yes, "yes", false, "confirm ordinary device changes")
 	flags.StringVar(&ackDeep, "ack-deep", "", "deep-persist acknowledgement phrase")
+
+	root.AddCommand(&cobra.Command{
+		Use:   "profiles",
+		Short: "List supported device models and their exact firmware profiles",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			catalogService, ok := service.(CatalogService)
+			if !ok {
+				return &ExitError{Code: 12, Err: fmt.Errorf("the device catalog is not configured")}
+			}
+			return renderProfiles(cmd.OutOrStdout(), catalogService.Catalog(), jsonOutput)
+		},
+	})
 
 	root.AddCommand(&cobra.Command{
 		Use:   "version",
@@ -318,11 +336,59 @@ func renderDoctor(writer io.Writer, report app.DoctorReport, jsonOutput bool) er
 	); err != nil {
 		return err
 	}
+	if err := renderCandidates(writer, report.Candidates); err != nil {
+		return err
+	}
 	if report.Error != nil {
 		_, err := fmt.Fprintf(writer, "Error: %s: %s\n", report.Error.Code, report.Error.Message)
 		return err
 	}
 	return nil
+}
+
+// renderCandidates lists the registered firmware of a recognized model after a compatibility failure.
+func renderCandidates(writer io.Writer, candidates []device.ProfileMatch) error {
+	var models []string
+	firmware := make(map[string][]string)
+	for _, candidate := range candidates {
+		p := candidate.Profile
+		model := fmt.Sprintf("%s %s (%s)", p.Vendor, p.Model, p.Hardware)
+		if _, known := firmware[model]; !known {
+			models = append(models, model)
+		}
+		firmware[model] = append(firmware[model], fmt.Sprintf("%s (profile %s)", p.Firmware, p.ID))
+	}
+	for _, model := range models {
+		if _, err := fmt.Fprintf(writer, "Supported firmware for %s: %s\n", model, strings.Join(firmware[model], ", ")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func renderProfiles(writer io.Writer, catalog []device.CatalogEntry, jsonOutput bool) error {
+	if jsonOutput {
+		if catalog == nil {
+			catalog = []device.CatalogEntry{}
+		}
+		return json.NewEncoder(writer).Encode(struct {
+			SchemaVersion int                   `json:"schema_version"`
+			Operation     string                `json:"operation"`
+			Models        []device.CatalogEntry `json:"models"`
+		}{SchemaVersion: 1, Operation: "profiles", Models: catalog})
+	}
+	for _, entry := range catalog {
+		if _, err := fmt.Fprintf(writer, "%s %s (%s)\n", entry.Vendor, entry.Model, entry.Hardware); err != nil {
+			return err
+		}
+		for _, p := range entry.Profiles {
+			if _, err := fmt.Fprintf(writer, "  firmware %-10s --profile %s\n", p.Firmware, p.ID); err != nil {
+				return err
+			}
+		}
+	}
+	_, err := fmt.Fprintln(writer, "Only the listed firmware versions are accepted; auto picks the single exact match.")
+	return err
 }
 
 func renderVerify(writer io.Writer, report app.VerifyReport, jsonOutput bool) error {

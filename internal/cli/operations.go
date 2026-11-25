@@ -184,7 +184,7 @@ func addOperationCommands(root *cobra.Command, options *operationOptions) {
 	root.AddCommand(backupCommand)
 
 	deepCommand := &cobra.Command{
-		Use: "deep-persist", Short: "HIGH RISK: three-reboot RD08 deep persistence", Args: cobra.NoArgs,
+		Use: "deep-persist", Short: "HIGH RISK: deep persistence with boot-flag writes and the profile's reboot sequence (three reboots on RD08 1.1.96)", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			service, ok := options.service.(DeepService)
 			if !ok {
@@ -196,8 +196,16 @@ func addOperationCommands(root *cobra.Command, options *operationOptions) {
 			}
 			ack := *options.ackDeep
 			if ack == "" && !*options.nonInteractive {
-				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "WARNING: this writes/erases MTD and bdata and reboots three times. Interruption may brick the router.")
-				_, _ = fmt.Fprint(cmd.ErrOrStderr(), "Type RD08-DEEP to continue: ")
+				policy, err := deepPolicy(options.service, *options.profileID)
+				if err != nil {
+					return err
+				}
+				phrase, reboots := "the deep-persist acknowledgement phrase", "several times"
+				if policy != nil {
+					phrase, reboots = policy.Acknowledgement, fmt.Sprintf("%d times", policy.RebootTransitions)
+				}
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "WARNING: this writes/erases MTD and bdata and reboots %s. Interruption may brick the router.\n", reboots)
+				_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Type %s to continue: ", phrase)
 				ack, err = readSecretLine(options.stdin)
 				if err != nil {
 					return &ExitError{Code: exitCode(err), Err: err}
@@ -439,4 +447,44 @@ func renderOperationError(writer io.Writer, operationErr *device.Error) error {
 	}
 	_, err := fmt.Fprintf(writer, "Error: %s: %s\n", operationErr.Code, operationErr.Message)
 	return err
+}
+
+// deepPolicy finds the deep policy the prompt describes: the explicit profile's own policy, or with auto
+// the single policy all registered deep profiles share. The application still verifies the phrase against
+// the resolved profile; this only decides what the warning and prompt show.
+func deepPolicy(service any, profileID string) (*device.DeepPolicy, error) {
+	catalogService, ok := service.(CatalogService)
+	if !ok {
+		return nil, nil
+	}
+	explicit := profileID != "" && profileID != "auto"
+	policies := make(map[device.DeepPolicy]struct{})
+	for _, entry := range catalogService.Catalog() {
+		for _, p := range entry.Profiles {
+			if p.Deep == nil {
+				continue
+			}
+			if explicit {
+				if p.ID == profileID {
+					policy := *p.Deep
+					return &policy, nil
+				}
+				continue
+			}
+			policies[*p.Deep] = struct{}{}
+		}
+	}
+	if explicit || len(policies) == 0 {
+		return nil, nil
+	}
+	if len(policies) > 1 {
+		return nil, &ExitError{Code: 2, Err: &device.Error{
+			Code:    device.CodeInvalidArgument,
+			Message: "registered profiles use different deep acknowledgements or reboot sequences; choose one with --profile or pass --ack-deep",
+		}}
+	}
+	for policy := range policies {
+		return &policy, nil
+	}
+	return nil, nil
 }

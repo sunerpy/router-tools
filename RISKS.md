@@ -41,7 +41,7 @@ Before the first write, the tool requires:
 - local backup integrity verification;
 - online identity, full MTD layout, and unchanged `boot_id` comparison;
 - required tools and a readable `crash` partition;
-- exact `RD08-DEEP` acknowledgement;
+- the resolved profile's exact deep acknowledgement (`RD08-DEEP` for `xiaomi-rd08-1.1.96`), checked before any network access and again after resolution;
 - no existing journal for that host/run directory.
 
 `--yes` cannot replace the deep acknowledgement. The tool never automatically retries an uncertain crash write/erase, never resumes from a guessed stage, and never attempts automatic rescue.

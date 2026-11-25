@@ -10,13 +10,15 @@ cmd/routerctl and future frontends
                 -> reusable protocol, transport, backup, and workflow packages
 ```
 
-Only the composition root wires concrete adapters. `internal/app` and `internal/cli` do not import an RD08 package. A future GUI must call the same typed application services in process; it must not scrape human CLI output or expose a localhost control service.
+Only the composition root wires concrete adapters, through `internal/devices/builtin` (`Adapters()` and `Discovery()`). `internal/app` and `internal/cli` do not import an adapter or the builtin list. A future GUI must call the same typed application services in process; it must not scrape human CLI output or expose a localhost control service.
 
 ## Exact profiles and capabilities
 
-A profile identifies one code adapter and one explicitly verified firmware, currently `xiaomi-rd08-1.1.96`. Resolution yields exactly one adapter or fails with `UNSUPPORTED_DEVICE`, `UNSUPPORTED_FIRMWARE`, `UNSUPPORTED_PROFILE`, or `AMBIGUOUS_DEVICE`. Explicit profile selection never falls back to another adapter.
+A profile identifies one code adapter and one exact firmware, currently `xiaomi-rd08-1.1.96` (model `xiaomi-rd08`). Profile IDs are always `<model-id>-<firmware>`; the binding RD08 specification's shorter `rd08-1.1.96` refers to the same profile. A `device.Adapter` registers the profile's driver together with the `Operations` that serve only it. Resolution yields exactly one adapter or fails with `UNSUPPORTED_DEVICE`, `UNSUPPORTED_FIRMWARE`, `UNSUPPORTED_PROFILE`, or `AMBIGUOUS_DEVICE`. Explicit profile selection never falls back to another adapter, and an unregistered explicit ID fails before any lock or network access. Every capability call goes to the resolved adapter's `Operations`; the discovery prober only identifies devices, so registering a second firmware can never route its writes through another firmware's code.
 
-Capabilities describe implemented behavior rather than intended support. Small interfaces (`AdminVerifier`, `RootVerifier`, `SSHEnabler`, `SoftPersistence`, `BackupCreator`, `DeepPersister`, and related online verifiers) avoid a mandatory all-device interface. The current RD08 adapter advertises doctor, Web auth, verify, enable, soft persistence, backup, and deep persistence after their respective tests.
+`Registry.Catalog()` groups profiles by model in registration order; `Registry.Candidates()` lists the registered firmware of a recognized model after a compatibility failure. Candidates explain failures (`routerctl doctor`, the Doctor report) and are never used to pick an adapter.
+
+Capabilities describe implemented behavior rather than intended support. A profile that declares `deep_persist` carries a `DeepPolicy` (typed acknowledgement phrase and exact reboot count); the application checks the phrase before any network access and again against the resolved profile before creating a journal or calling the adapter. Small interfaces (`AdminVerifier`, `RootVerifier`, `SSHEnabler`, `SoftPersistence`, `BackupCreator`, `DeepPersister`, and related online verifiers) avoid a mandatory all-device interface. The current RD08 adapter advertises doctor, Web auth, verify, enable, soft persistence, backup, and deep persistence after their respective tests.
 
 Unknown firmware is never treated as compatible merely because the hardware string matches. Hardware identity takes priority over display-name fallback.
 

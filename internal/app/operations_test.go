@@ -43,9 +43,8 @@ func (p *operationProber) CreateBackup(_ context.Context, _ device.Target, _ sec
 func TestSoftPersistRequiresConfirmation(t *testing.T) {
 	t.Parallel()
 
-	registry, _ := device.NewRegistry(fakeDriver{profile: device.Profile{ID: "test"}})
 	prober := &operationProber{}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, fakeDriver{profile: device.Profile{ID: "test"}}, prober), prober)
 	password, _ := secret.NewPassword("root")
 	_, err := service.PersistSoft(t.Context(), app.SoftRequest{Target: device.DefaultTarget(), RootPassword: password}, nil)
 	assertCode(t, err, device.CodeConfirmationRequired)
@@ -58,14 +57,13 @@ func TestRebootVerifyReport(t *testing.T) {
 	t.Parallel()
 
 	driver := fakeDriver{profile: device.Profile{ID: "test", Capabilities: []device.Capability{device.CapabilitySoftPersist}}, match: device.MatchResult{Level: device.ExactMatch}}
-	registry, _ := device.NewRegistry(driver)
 	prober := &operationProber{rebootResult: app.RebootResult{
 		OldBootID:    "00000000-0000-0000-0000-000000000001",
 		NewBootID:    "00000000-0000-0000-0000-000000000002",
 		SSHVerified:  true,
 		SoftVerified: true,
 	}}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, driver, prober), prober)
 	password, _ := secret.NewPassword("root")
 	report, err := service.RebootVerify(t.Context(), app.SoftRequest{Target: device.DefaultTarget(), RootPassword: password, Confirmed: true}, nil)
 	if err != nil {
@@ -79,9 +77,8 @@ func TestRebootVerifyReport(t *testing.T) {
 func TestBackupCreateValidatesPasswordBeforeNetwork(t *testing.T) {
 	t.Parallel()
 
-	registry, _ := device.NewRegistry(fakeDriver{profile: device.Profile{ID: "test"}})
 	prober := &operationProber{}
-	service, _ := app.NewService(registry, prober)
+	service, _ := app.NewService(newTestRegistry(t, fakeDriver{profile: device.Profile{ID: "test"}}, prober), prober)
 	_, err := service.BackupCreate(t.Context(), app.BackupCreateRequest{Target: device.DefaultTarget(), OutputDir: t.TempDir()}, nil)
 	assertCode(t, err, device.CodeInvalidPassword)
 	if prober.calls != 0 || prober.fakeProber.calls != 0 {

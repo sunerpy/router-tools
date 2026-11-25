@@ -16,6 +16,17 @@ Common target flags:
 --run-dir <private-report-directory>
 ```
 
+`--profile` takes `auto` (the single exact match) or an exact profile ID listed by `routerctl profiles`; an unregistered ID fails before any network access, and an explicit profile never falls back:
+
+```text
+$ routerctl profiles
+Xiaomi BE6500 Pro (RD08)
+  firmware 1.1.96     --profile xiaomi-rd08-1.1.96
+Only the listed firmware versions are accepted; auto picks the single exact match.
+```
+
+`routerctl --json profiles` prints one JSON object (`schema_version`, `operation`, `models`). When `doctor` recognizes the model but not its firmware, it prints the supported firmware for that model.
+
 Configuration precedence is explicit CLI flag > JSON file > built-in default. The default file is the OS user configuration directory under `routerctl/config.json`. Unknown fields, secret-looking fields, invalid ports, and unsupported schema versions are rejected.
 
 SSH flags:
@@ -105,7 +116,7 @@ routerctl \
   deep-persist
 ```
 
-Read `RISKS.md` and `RECOVERY.md` first. `--yes` has no effect on this dedicated acknowledgement. An existing `<host>-deep.json` in the run directory blocks the operation. Do not rename an old journal merely to bypass the safety gate.
+Read `RISKS.md` and `RECOVERY.md` first. The acknowledgement is the resolved profile's own phrase (`RD08-DEEP` for `xiaomi-rd08-1.1.96`); the interactive prompt shows it, and when registered profiles use different phrases it asks for `--profile` or `--ack-deep`. `--yes` has no effect on this dedicated acknowledgement. An existing `<host>-deep.json` in the run directory blocks the operation. Do not rename an old journal merely to bypass the safety gate.
 
 ## Output and exit codes
 
