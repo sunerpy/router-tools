@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Router Tools",
+  "outputfilename": "routergui",
+  "frontend:install": "pnpm install",
+  "frontend:build": "pnpm run build",
+  "frontend:dev:watcher": "pnpm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "frontend:dir": "frontend",
+  "info": {
+    "companyName": "router-tools contributors",
+    "productName": "Router Tools",
+    "productVersion": "0.0.0",
+    "copyright": "Copyright (c) 2026 router-tools contributors",
+    "comments": "Safety-gated router management for exact firmware profiles"
+  }
+}

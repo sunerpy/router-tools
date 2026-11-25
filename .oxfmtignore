@@ -1,0 +1,29 @@
+# oxfmt formats non-code files (YAML / JSON / Markdown). Exclude files that are
+# generated, vendored, or owned by another tool — reformatting them creates
+# churn or breaks downstream tooling.
+#
+# CRITICAL: changelog files are owned by release-please / git-cliff. If oxfmt
+# reformats them, the next regeneration conflicts and CI fmt-check falsely fails
+# on every PR between releases. Always exclude them.
+
+# Vendored / generated code
+vendor/
+*.pb.go
+
+# Tool-owned changelogs — DO NOT reformat
+changelog/
+CHANGELOG.md
+.release-please-manifest.json
+release-please-config.json
+# release-please extra-files target (info.productVersion)
+cmd/routergui/wails.json
+
+# Lockfiles
+**/buf.lock
+Cargo.lock
+
+# Build output
+dist/
+build/
+bin/
+target/

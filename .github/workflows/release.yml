@@ -1,0 +1,375 @@
+# Same-run release: release-please owns version, tag, and a draft Release.
+# GoReleaser builds every routerctl target and attaches the archives plus
+# checksums.txt; two read-only legs package the Windows and macOS GUI. The
+# terminal job attaches the GUI assets, extends checksums.txt with them, attests
+# that one file (covering every asset), verifies every remote asset, and flips
+# the draft. Requires .github/scripts/resolve-release-gate.sh and
+# .github/scripts/publish-release-draft.sh from the shared asset set.
+#
+# --exact in the terminal job holds because checksums.txt lists every archive and
+# GUI asset. Enabling GoReleaser signs, sboms, source archives, or Homebrew and
+# winget blocks adds assets; add matching --expect-name arguments or the flip
+# fails and the draft stays.
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Existing draft release tag to rebuild, for example v1.2.3"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  WAILS_VERSION: v2.17.1
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      build_artifacts: ${{ steps.gate.outputs.build_artifacts }}
+      prerelease: ${{ steps.gate.outputs.prerelease }}
+      release_sha: ${{ steps.gate.outputs.release_sha }}
+      tag_name: ${{ steps.gate.outputs.tag_name }}
+      version: ${{ steps.gate.outputs.version }}
+    steps:
+      - name: Run release-please
+        id: release
+        if: github.event_name == 'push'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Checkout release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Resolve release gate
+        id: gate
+        shell: bash
+        env:
+          DEFAULT_BRANCH: main
+          EVENT_NAME: ${{ github.event_name }}
+          GH_TOKEN: ${{ github.token }}
+          INPUT_TAG: ${{ inputs.tag_name }}
+          REF_PROTECTED: ${{ github.ref_protected }}
+          RELEASE_CREATED: ${{ steps.release.outputs.release_created }}
+          RELEASE_SHA: ${{ steps.release.outputs.sha }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          REPO: ${{ github.repository }}
+          RUN_REF: ${{ github.ref }}
+        run: bash .github/scripts/resolve-release-gate.sh
+
+  goreleaser:
+    name: Build and attach release assets
+    needs: release-please
+    if: needs.release-please.outputs.build_artifacts == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # GoReleaser compiles project code and uploads to the draft, so this job
+    # holds contents: write but no id-token; the publish job attests.
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Require the tag to resolve to the release commit
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ needs.release-please.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$RELEASE_SHA" ]; then
+            echo "::error title=Release build::checked-out tag differs from the release commit"
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: ${{ hashFiles('**/go.sum') != '' }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: cmd/routergui/frontend/package.json
+
+      # No dependency cache in a job that holds contents: write.
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Install pinned format tools
+        run: |
+          go install mvdan.cc/gofumpt@v0.11.0
+          go install golang.org/x/tools/cmd/goimports@v0.49.0
+          npm install --global oxfmt@0.64.0
+
+      # cmd/routergui embeds frontend/dist, so go vet/test/lint over ./... need it.
+      - name: Build frontend
+        working-directory: cmd/routergui/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Format check
+        run: make fmt-check
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.1
+          install-mode: goinstall
+          install-only: true
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          # Pinned deliberately; bump only after reading the changelog.
+          version: v2.17.1
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload checksums for the publish job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: checksums
+          path: dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  gui-windows:
+    name: GUI Windows
+    needs: release-please
+    if: needs.release-please.outputs.build_artifacts == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Executes project and dependency code: read-only token, no caches, no secrets.
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Require the tag to resolve to the release commit
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ needs.release-please.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$RELEASE_SHA" ]; then
+            echo "::error title=Release build::checked-out tag differs from the release commit"
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: cmd/routergui/frontend/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Install NSIS and 7-Zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nsis p7zip-full
+
+      - name: Install Wails CLI
+        run: go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
+
+      - name: Package the Windows installer and portable zip
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: scripts/package-gui.sh windows --version "$VERSION" --out dist-gui
+
+      - name: Upload the Windows GUI assets
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gui-windows
+          path: dist-gui/
+          if-no-files-found: error
+          retention-days: 1
+
+  gui-macos:
+    name: GUI macOS
+    needs: release-please
+    if: needs.release-please.outputs.build_artifacts == 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    # Executes project and dependency code: read-only token, no caches, no secrets.
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name }}
+          persist-credentials: false
+
+      - name: Require the tag to resolve to the release commit
+        shell: bash
+        env:
+          RELEASE_SHA: ${{ needs.release-please.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          if [ "$(git rev-parse HEAD)" != "$RELEASE_SHA" ]; then
+            echo "::error title=Release build::checked-out tag differs from the release commit"
+            exit 1
+          fi
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: cmd/routergui/frontend/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+
+      - name: Install Wails CLI
+        run: go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
+
+      - name: Package the macOS app
+        env:
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: scripts/package-gui.sh darwin --version "$VERSION" --out dist-gui
+
+      - name: Upload the macOS GUI asset
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: gui-macos
+          path: dist-gui/
+          if-no-files-found: error
+          retention-days: 1
+
+  publish-release:
+    name: Publish Release
+    needs: [release-please, goreleaser, gui-windows, gui-macos]
+    if: needs.release-please.outputs.build_artifacts == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    # Downloads, attaches, attests, verifies, and flips; executes no project code,
+    # so it is the only job holding id-token: write.
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download checksums
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: checksums
+          path: dist
+
+      - name: Download GUI assets
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: gui-*
+          path: dist-gui
+          merge-multiple: true
+
+      - name: Attach GUI assets and extend checksums.txt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+        run: |
+          set -euo pipefail
+          expected=(
+            "router-tools_${VERSION}_windows_amd64_setup.exe"
+            "router-tools_${VERSION}_windows_amd64_portable.zip"
+            "router-tools_${VERSION}_darwin_universal.zip"
+          )
+          mapfile -t found < <(cd dist-gui && find . -maxdepth 1 -type f -printf '%f\n' | sort)
+          mapfile -t wanted < <(printf '%s\n' "${expected[@]}" | sort)
+          if [ "${found[*]}" != "${wanted[*]}" ]; then
+            echo "::error title=GUI assets::expected ${wanted[*]}, found ${found[*]}"
+            exit 1
+          fi
+          for name in "${expected[@]}"; do
+            if awk -v n="$name" '$2 == n || $2 == "*" n { hit = 1 } END { exit !hit }' dist/checksums.txt; then
+              echo "::error title=GUI assets::$name is already listed in checksums.txt"
+              exit 1
+            fi
+          done
+          (cd dist-gui && sha256sum -- "${expected[@]}") >> dist/checksums.txt
+          gh release upload "$TAG" "${expected[@]/#/dist-gui/}" --repo "$REPO" --clobber
+          gh release upload "$TAG" dist/checksums.txt --repo "$REPO" --clobber
+
+      - name: Attest release assets
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-checksums: dist/checksums.txt
+
+      - name: Verify remote assets and publish the draft
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          bash .github/scripts/publish-release-draft.sh --publish \
+            --checksums dist/checksums.txt --asset dist/checksums.txt --exact

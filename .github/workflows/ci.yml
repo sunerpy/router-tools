@@ -1,0 +1,225 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+
+# A new head of a pull request cancels its stale run. Every other run has a group
+# of its own event and commit, so no later push cancels a default-branch commit's
+# CI, running or pending. Releases are gated by CI Success on the release PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  WAILS_VERSION: v2.17.1
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: ${{ hashFiles('**/go.sum') != '' }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: cmd/routergui/frontend/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: cmd/routergui/frontend/pnpm-lock.yaml
+
+      - name: Install pinned format tools
+        run: |
+          go install mvdan.cc/gofumpt@v0.11.0
+          go install golang.org/x/tools/cmd/goimports@v0.49.0
+          npm install --global oxfmt@0.64.0
+
+      # cmd/routergui embeds frontend/dist, so every go vet/test/lint needs it built.
+      - name: Build frontend
+        working-directory: cmd/routergui/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Format check
+        run: make fmt-check
+
+      # Built with this job's Go so the linter supports the module's Go version.
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.13.1
+          install-mode: goinstall
+          install-only: true
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: Build CLI for every release target
+        run: make build-all
+
+      - name: GUI tests
+        run: make gui-test
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: ${{ hashFiles('**/go.sum') != '' }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: cmd/routergui/frontend/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: cmd/routergui/frontend/pnpm-lock.yaml
+
+      - name: Build frontend
+        working-directory: cmd/routergui/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Test
+        run: go test -mod=readonly ./...
+
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: ${{ hashFiles('**/go.sum') != '' }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: cmd/routergui/frontend/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: cmd/routergui/frontend/pnpm-lock.yaml
+
+      - name: Build frontend
+        working-directory: cmd/routergui/frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Test
+        run: go test -mod=readonly ./...
+
+      - name: Install Wails CLI
+        run: go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
+
+      - name: Package the macOS app (smoke)
+        run: scripts/package-gui.sh darwin --out "$RUNNER_TEMP/gui"
+
+  gui-windows:
+    name: GUI Windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: ${{ hashFiles('**/go.sum') != '' }}
+          cache-dependency-path: "**/go.sum"
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: cmd/routergui/frontend/package.json
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: pnpm
+          cache-dependency-path: cmd/routergui/frontend/pnpm-lock.yaml
+
+      - name: Install NSIS and 7-Zip
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends nsis p7zip-full
+
+      - name: Install Wails CLI
+        run: go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
+
+      - name: Package the Windows installer and portable zip (smoke)
+        run: scripts/package-gui.sh windows --out "$RUNNER_TEMP/gui"
+
+  ci-success:
+    name: CI Success
+    needs: [go, windows, macos, gui-windows]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Require every CI job to succeed
+        env:
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: |
+          jq -e 'all(.[]; .result == "success")' <<<"$NEEDS_JSON"

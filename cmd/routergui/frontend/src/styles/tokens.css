@@ -1,0 +1,166 @@
+/* Router Tools design tokens (DESIGN.md §1). Two themes share one component set: `data-theme`
+   on <html> selects 白瓷 (light, the default) or 石墨 (dark). Colour values come from Voltip's
+   `light` and `graphite` themes; components reference only these variables. Every colour that
+   tokens.test.ts checks for contrast stays a #rrggbb literal. */
+
+:root,
+[data-theme="light"] {
+  color-scheme: light;
+  --rt-canvas: #f2f3f6;
+  --rt-surface: #ffffff;
+  --rt-sidebar: #f7f8fa;
+  --rt-inset: #f7f8fa;
+  --rt-inset-strong: #eef0f3;
+  --rt-field: #ffffff;
+  --rt-nav-active: #e6e9ee;
+  --rt-border: #e1e4ea;
+  --rt-border-strong: #d6dae1;
+  --rt-fg: #1b1d22;
+  --rt-fg-muted: #5f6570;
+  --rt-primary: #1b1d22;
+  --rt-primary-fg: #ffffff;
+  --rt-accent: #339cff;
+  --rt-accent-soft: #e7f3ff;
+  --rt-accent-text: #036dc0;
+  --rt-toggle-on: #036dc0;
+  --rt-toggle-off: #c4c9d2;
+  --rt-thumb: #ffffff;
+  --rt-ok: #2e9e62;
+  --rt-ok-soft: #e4f4ea;
+  --rt-ok-text: #1f7a4a;
+  --rt-warning: #b7791f;
+  --rt-warning-soft: #fbf1dc;
+  --rt-warning-text: #8a5a10;
+  --rt-danger: #c93a33;
+  --rt-danger-soft: #f9e7e5;
+  --rt-danger-text: #b3261e;
+  --rt-danger-fg: #ffffff;
+  --rt-highlight-from: #262c3a;
+  --rt-highlight-to: #1b1d22;
+  --rt-highlight-fg: #ffffff;
+  --rt-highlight-muted: #b4bcc8;
+  --rt-highlight-chip: rgb(255 255 255 / 12%);
+  --rt-highlight-icon: color-mix(in srgb, var(--rt-accent) 55%, #ffffff);
+  --rt-highlight-border: transparent;
+  --rt-highlight-glow: 55%;
+  --rt-tile-tint: 5%;
+  --rt-tile-edge: 22%;
+  --rt-scrim: rgb(27 29 34 / 38%);
+  --rt-shadow-pop: 0 8px 24px 0 rgb(27 29 34 / 8%), 0 0 0 1px rgb(27 29 34 / 6%);
+  --rt-shadow-dialog: 0 24px 64px -20px rgb(27 29 34 / 22%), 0 0 0 1px rgb(27 29 34 / 8%);
+  --rt-shadow-thumb: 0 1px 2px 0 rgb(0 0 0 / 20%);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+  --rt-canvas: #22252b;
+  --rt-surface: #2a2e35;
+  --rt-sidebar: #262a30;
+  --rt-inset: #333840;
+  --rt-inset-strong: #3a4048;
+  --rt-field: #262a30;
+  --rt-nav-active: #333840;
+  --rt-border: #414750;
+  --rt-border-strong: #4c535d;
+  --rt-fg: #eceef1;
+  --rt-fg-muted: #a5acb6;
+  --rt-primary: #eceef1;
+  --rt-primary-fg: #22252b;
+  --rt-accent: #339cff;
+  --rt-accent-soft: #2c4b6a;
+  --rt-accent-text: #83befe;
+  --rt-toggle-on: #339cff;
+  --rt-toggle-off: #4c535d;
+  --rt-thumb: #ffffff;
+  --rt-ok: #3eddb2;
+  --rt-ok-soft: #263d3a;
+  --rt-ok-text: #3eddb2;
+  --rt-warning: #f2c14e;
+  --rt-warning-soft: #3d3826;
+  --rt-warning-text: #f2c14e;
+  --rt-danger: #f0736a;
+  --rt-danger-soft: #3f2b2a;
+  --rt-danger-text: #f0736a;
+  --rt-danger-fg: #22252b;
+  --rt-highlight-from: #2c4b6a;
+  --rt-highlight-to: #2a2e35;
+  --rt-highlight-fg: #eceef1;
+  --rt-highlight-muted: #b2c2d6;
+  --rt-highlight-chip: color-mix(in srgb, var(--rt-accent) 22%, transparent);
+  --rt-highlight-icon: var(--rt-accent-text);
+  --rt-highlight-border: color-mix(in srgb, var(--rt-accent) 40%, transparent);
+  --rt-highlight-glow: 40%;
+  --rt-tile-tint: 8%;
+  --rt-tile-edge: 28%;
+  --rt-scrim: rgb(0 0 0 / 55%);
+  --rt-shadow-pop: 0 8px 24px 0 rgb(0 0 0 / 35%);
+  --rt-shadow-dialog: 0 24px 64px -20px rgb(0 0 0 / 50%), 0 0 0 1px rgb(0 0 0 / 8%);
+  --rt-shadow-thumb: 0 1px 2px 0 rgb(0 0 0 / 20%);
+}
+
+/* Theme-independent tokens. */
+:root {
+  --rt-hover: color-mix(in srgb, var(--rt-fg) 6%, transparent);
+  --rt-pressed: color-mix(in srgb, var(--rt-fg) 10%, transparent);
+  --rt-focus: var(--rt-accent-text);
+
+  --rt-font-ui:
+    "Instrument Sans Variable", "Noto Sans SC Variable", "PingFang SC", "Microsoft YaHei UI",
+    system-ui, sans-serif;
+  --rt-font-mono:
+    "JetBrains Mono Variable", "Noto Sans SC Variable", ui-monospace, "Cascadia Mono", Menlo,
+    Consolas, monospace;
+  --rt-text-xs: 12px;
+  --rt-text-sm: 13px;
+  --rt-text-md: 14px;
+  --rt-text-lg: 16px;
+  --rt-text-xl: 18px;
+  --rt-text-2xl: 22px;
+  --rt-text-3xl: 26px;
+  --rt-weight-regular: 400;
+  --rt-weight-medium: 500;
+  --rt-weight-strong: 600;
+  --rt-leading: 1.5;
+  --rt-leading-tight: 1.25;
+
+  --rt-space-1: 4px;
+  --rt-space-2: 8px;
+  --rt-space-3: 12px;
+  --rt-space-4: 16px;
+  --rt-space-5: 24px;
+  --rt-space-6: 32px;
+  --rt-card-inset: 20px;
+
+  --rt-r-panel: 10px;
+  --rt-r-control: 6px;
+  --rt-r-pill: 999px;
+  --rt-border-width: 1px;
+  --rt-focus-width: 2px;
+  --rt-control-height: 40px;
+  --rt-control-height-compact: 32px;
+  --rt-touch-target: 44px;
+  --rt-switch-width: 32px;
+  --rt-switch-height: 19px;
+  --rt-switch-thumb: 15px;
+  --rt-chip-size: 32px;
+  --rt-chip-size-lg: 36px;
+  --rt-row-height: 60px;
+  --rt-step-min: 160px;
+  --rt-field-min: 220px;
+  --rt-lamp-halo: 3px;
+  --rt-indicator-width: 3px;
+  --rt-badge-height: 24px;
+  --rt-lamp-size: 8px;
+  --rt-icon-stroke: 1.75px;
+
+  --rt-motion-fast: 120ms;
+  --rt-motion-ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  --rt-sidebar-width: 232px;
+  --rt-shell-gap: 16px;
+  --rt-brand-height: 52px;
+  --rt-nav-row: 40px;
+  --rt-report-max-height: 320px;
+  --rt-dialog-width: 480px;
+  --rt-content-max: 1200px;
+}

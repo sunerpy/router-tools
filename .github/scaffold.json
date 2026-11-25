@@ -1,0 +1,24 @@
+{
+  "profile": "go",
+  "addons": ["pr-title"],
+  "placeholders": {
+    "BINARY": "routerctl",
+    "CURRENT_VERSION": "0.0.0",
+    "DEFAULT_BRANCH": "main",
+    "GO_MODULE": "github.com/sunerpy/router-tools",
+    "OWNER": "sunerpy",
+    "PACKAGE_NAME": "router-tools",
+    "REPO": "router-tools"
+  },
+  "drift_allow": [
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml",
+    ".github/dependabot.yml",
+    ".goreleaser.yaml",
+    "release-please-config.json",
+    "Makefile",
+    ".oxfmtrc.json",
+    ".oxfmtignore"
+  ],
+  "$comment": "ci.yml/release.yml add the frontend build and the Windows/macOS GUI legs; the Makefile is the repository's own contract and passes --ignore-path .oxfmtignore to oxfmt; .oxfmtrc.json keeps the repository's formatter options; .oxfmtignore also excludes wails.json, which release-please rewrites."
+}

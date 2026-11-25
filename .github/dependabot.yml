@@ -1,0 +1,19 @@
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    # Keep stale dependency branches from rebuilding after every default-branch
+    # merge. Reviewers can request a manual rebase when they intend to merge.
+    rebase-strategy: disabled
+    open-pull-requests-limit: 2
+    schedule:
+      interval: weekly
+    # PR titles become squash subjects and must pass the Conventional title check.
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      github-actions:
+        patterns:
+          - "*"

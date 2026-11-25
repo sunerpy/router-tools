@@ -1,0 +1,51 @@
+version: 2
+
+project_name: routerctl
+
+builds:
+  - id: routerctl
+    main: ./cmd/routerctl
+    binary: routerctl
+    env:
+      - CGO_ENABLED=0
+      - GOFLAGS=-mod=readonly
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    # Same metadata as `make build`: internal/buildinfo, printed by `routerctl version`.
+    ldflags:
+      - -s -w
+      - -X github.com/sunerpy/router-tools/internal/buildinfo.Version={{ .Tag }}
+      - -X github.com/sunerpy/router-tools/internal/buildinfo.CommitID={{ .ShortCommit }}
+      - -X github.com/sunerpy/router-tools/internal/buildinfo.BuildTime={{ .Date }}
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # The binary stays at the archive root (scripts/install.sh and install.ps1 expect it there).
+    files:
+      - LICENSE*
+      - README*
+      - CHANGELOG*
+      - THIRD_PARTY_NOTICES*
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  disable: true
+
+release:
+  draft: true
+  use_existing_draft: true
+  prerelease: auto
+  replace_existing_artifacts: true

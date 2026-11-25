@@ -1,0 +1,51 @@
+/* Shared field skin for TextInput, SecretInput and native selects (DESIGN.md §3). */
+.rt-field {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  min-height: var(--rt-control-height);
+  color: var(--rt-fg);
+  background: var(--rt-field);
+  border: var(--rt-border-width) solid var(--rt-border-strong);
+  border-radius: var(--rt-r-control);
+}
+.rt-field:focus-within {
+  border-color: var(--rt-focus);
+  outline: var(--rt-focus-width) solid var(--rt-focus);
+  outline-offset: var(--rt-focus-width);
+}
+.rt-field[aria-invalid="true"],
+.rt-field:has([aria-invalid="true"]) {
+  border-color: var(--rt-danger);
+}
+.rt-field__control {
+  width: 100%;
+  min-width: 0;
+  min-height: calc(var(--rt-control-height) - 2 * var(--rt-border-width));
+  padding: 0 var(--rt-space-3);
+  color: inherit;
+  background: transparent;
+  border: 0;
+  border-radius: inherit;
+  outline: 0;
+}
+.rt-field__control:focus-visible {
+  outline: 0;
+}
+.rt-field__control:disabled {
+  color: var(--rt-fg-muted);
+  cursor: not-allowed;
+}
+.rt-field__control::placeholder {
+  color: var(--rt-fg-muted);
+}
+select.rt-field__control {
+  cursor: pointer;
+}
+@media (pointer: coarse) {
+  .rt-field,
+  .rt-field__control {
+    min-height: var(--rt-touch-target);
+  }
+}

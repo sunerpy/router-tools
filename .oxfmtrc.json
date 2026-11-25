@@ -1,0 +1,3 @@
+{
+  "ignorePatterns": ["cmd/routergui/frontend/wailsjs/"]
+}

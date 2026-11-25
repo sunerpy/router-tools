@@ -1,0 +1,12 @@
+dist/
+logs/
+*.test
+*.out
+.DS_Store
+.idea/
+.vscode/
+node_modules/
+cmd/routergui/build/
+*.tsbuildinfo
+dist-gui/
+cmd/routergui/frontend/package.json.md5

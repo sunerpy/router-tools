@@ -1,0 +1,79 @@
+# Contributor rules
+
+## Development method
+
+Use TDD for every behavior change: write a focused failing test, observe its failure for the intended reason, implement the minimum behavior, then refactor while keeping all tests green. Record meaningful protocol/state-machine slices in `docs/tdd-log.md`.
+
+## Architecture
+
+- Keep `internal/app` and `internal/cli` independent of concrete device adapters.
+- Add support at exact model+firmware boundaries. Never infer write compatibility from a similar model or newer firmware.
+- Advertise only implemented capabilities. Unknown devices, firmware, host keys, layouts, and ambiguous matches fail closed.
+- Keep CLI/GUI rendering outside protocol code. Reuse typed application requests, reports, and events.
+- Update `DESIGN.md` before adding or changing UI tokens, primitives, states, motion, or accessibility contracts. Verify primitives before composing product screens and run 375/768/1280 browser QA for UI changes.
+
+## Safety
+
+- Never log or serialize passwords, Base64 password payloads, `stok`, Web keys, nonces, password hashes, or private keys.
+- Never add an arbitrary remote-shell command, dynamic script profile, insecure SSH host-key callback, or automatic deep retry/resume/restore.
+- HTTP MAC additions are writes: do not retry on timeout. Cleanup is always attempted without overwriting the primary error.
+- Final SSH evidence requires password authentication and exact `id -u == 0`; an open port or Telnet login is insufficient.
+- Deep changes require verified backup, online layout/boot match, dedicated acknowledgement, operation lock, and journal. CI must never execute real MTD writes.
+
+## Verification
+
+Before submitting changes, run:
+
+```bash
+make fmt-check
+make lint
+make test
+make build-all
+```
+
+Use loopback/fake servers for protocols and temporary directories for filesystem operations. Tests must not require a router, Internet access, or the original reference repository. Real-device results belong in `docs/compatibility.md` and must never be inferred from fake coverage.
+
+## Commands
+
+```bash
+# One Go test
+go test ./internal/devices/xiaomi/rd08/v1_1_96 -run '^TestEnableSSHFixedSequenceAndCleanup$' -count=1 -v
+
+# One Vitest file or case
+cd cmd/routergui/frontend && pnpm exec vitest run src/components/primitives.test.ts -t "emits click"
+
+make gui-test   # Vitest, vue-tsc, Vite build, then go test of internal/guiapi and cmd/routergui
+make check      # fmt-check, lint, test, build-local, gui-test
+```
+
+- `make test` runs `go test ./... -race` with `CGO_ENABLED=1` (needs a C compiler) and writes `dist/coverage.{out,html}`.
+- `make fmt` rewrites files: `goimports -local github.com/sunerpy/router-tools`, `gofumpt -extra`, and `oxfmt` over the whole repository. oxfmt also checks Markdown and realigns tables, so documentation edits can fail `make fmt-check`. `.oxfmtrc.json` excludes the generated `cmd/routergui/frontend/wailsjs/`, which `make gui-build` and `wails dev` rewrite in Wails' own style. `make build` runs `make fmt` first; `make build-local` does not.
+- `make lint` is `go vet` plus golangci-lint v2 with `.golangci.yml` (gofumpt and goimports formatters; bodyclose, errcheck, govet, ineffassign, misspell, staticcheck, unconvert, unused). When a tool is missing, `fmt-check` and `lint` print the pinned install command.
+- `cmd/routergui/main.go` embeds `frontend/dist`, which is gitignored. On a fresh checkout every `./...` command (`go vet`, `make lint`, `make test`) fails with `pattern all:frontend/dist: no matching files found` until `cd cmd/routergui/frontend && pnpm install && pnpm build` has run.
+- Without Wails build tags, `cmd/routergui` links Wails' stub app. `go test ./...` therefore needs no GTK/WebKit, but a binary from plain `go build ./cmd/routergui` only exits with a build-tags error. Run the GUI with `cd cmd/routergui && wails dev -tags webkit2_41` or build it with `make gui-build`.
+- `pnpm dev` (Vite on 127.0.0.1:5173) without Wails bindings uses the mock API in `src/services/wails.ts`. Set `window.__ROUTER_PREVIEW_SCENARIO__` to `failed`, `partial`, `unknown`, or `long` (default: success), and call `window.__routerHostKey()` to open the host-key dialog. A production build without bindings rejects every call instead of simulating.
+
+## Git, CI, and releases
+
+- Every change reaches `main` through a pull request, squash-merged with the PR title as the commit subject: `gh pr merge --squash --match-head-commit <verified head>`, never `--admin`. Do not push to `main` directly, even though the owner's admin bypass in the branch ruleset would let the push through; the bypass is for emergencies, and the bootstrap commit was the one direct push.
+- PR titles are Conventional Commits (`pr-title.yml` checks them) because release-please reads the squash subjects: `feat` bumps minor; `fix`, `perf`, and `revert` bump patch; other types do not release; `!` marks a breaking change, which stays a minor bump before 1.0.
+- `CI Success` and `Conventional PR title` are the required checks. `CI Success` aggregates every job in `.github/workflows/ci.yml`: the Linux gate (`make fmt-check`, `make lint`, `make test`, `make build-all`, `make gui-test`), `go test` on Windows and macOS, and the GUI packaging smoke for Windows (cross-built on Linux) and macOS. Add any new CI job to `ci-success.needs`.
+- `.github/workflows/release.yml` runs release-please on every push to `main`. Merging the release PR creates the tag and a draft Release in the same run; GoReleaser attaches the CLI archives, `scripts/package-gui.sh` builds the GUI assets on Linux and macOS, and `Publish Release` attests `checksums.txt`, verifies every remote asset, and only then publishes. A failed leg leaves the draft: rebuild it with `workflow_dispatch` (`tag_name`). Never move or delete a release tag; fix forward with a new version.
+- Release PRs are opened with `GITHUB_TOKEN`, so their CI runs wait in `action_required` until someone approves them.
+- release-please owns `CHANGELOG.md`, `.release-please-manifest.json`, and `info.productVersion` in `cmd/routergui/wails.json` (`extra-files`); do not edit them by hand. Release asset names must not contain spaces, because GitHub rewrites them.
+- Every action is pinned to a full commit SHA with its tag as a comment, and the repository's Actions policy rejects unpinned actions. Dependabot proposes the updates with `ci(deps)` titles.
+
+## How the code fits together
+
+`README.md` and `docs/architecture.md` describe the layers and contracts. These mechanics span several files:
+
+- **Wiring.** `cmd/routerctl/main.go` and `cmd/routergui/main.go` each build the same graph: the RD08 driver in `device.NewRegistry`, `rd08v1196.NewProber(nil)` as the only prober, a flock locker under `<UserConfigDir>/routerctl/locks`, then `app.NewServiceWithLocker`. Wiring changes go in both.
+- **Driver vs. prober.** A `device.Driver` only supplies `Profile()` (exact firmware, advertised capabilities) and `Match()`. Behavior lives on the prober: each use case checks `Profile.Supports(...)`, then type-asserts `s.prober` to a small interface declared in `internal/app` (`AdminVerifier`, `RootVerifier`, `SSHEnabler`, `SoftPersistence`, `RebootVerifier`, `BackupCreator`, `OnlineBackupVerifier`, `DeepPersister`). An operation works only when the profile lists it and the prober implements it. `app.Service` holds one prober, so a second adapter needs prober dispatch, which does not exist yet. Adapters import `internal/app` for request and result types; `internal/app` never imports adapters.
+- **Use-case template.** `softOperation` in `internal/app/operations.go` is the reference. It starts a report with `Status: "running"` and defines a `fail` closure that normalizes the error to `*device.Error`, redacts the request's passwords, and returns the report together with the error. Then, in order: input validation before any network access, the per-target lock before probing (all changing and backup operations), probe and profile resolution (`auto` takes the single exact match; an explicit profile ID never falls back), the capability check, and the adapter call. The CLI renders the returned report on failure too.
+- **Errors and exit codes.** Codes live in `internal/device/errors.go`. `exitCode()` in `internal/cli/cli.go` maps them to exit codes, and unmapped codes become 12. The table in `docs/usage.md` documents the mapping. A new code touches all three.
+- **CLI.** `cli.ExecuteWithInput` receives one service and finds each command's backend by type-asserting it to `VerifyService`, `EnableService`, `SoftService`, `BackupService`, `OnlineBackupService`, or `DeepService`, so tests pass small fakes.
+- **GUI.** Vue calls `window.go.main.App.*` directly from `src/services/wails.ts`; the generated `frontend/wailsjs/` files are not imported. The call reaches `cmd/routergui/app.go`, then `internal/guiapi.Service`, which converts DTO password strings to `secret.Password` and owns per-operation cancellation and the last 50 reports, then `internal/app`. Progress arrives as the Wails event `operation:progress`. An unknown host key emits `hostkey:confirm` and waits up to 2 minutes for `ResolveHostKey` before rejecting. Wails rejects the promise and drops the return value whenever a bound method returns a non-nil error, so `guiapi`'s `settle` resolves failed, partial, and unknown reports with a nil error. A canceled run carries code `CANCELED` and keeps its use case's status: enable and deep persistence report partial or unknown once a write may have happened, every other use case reports failed for any error, and the UI shows only failed cancellations as canceled. A bound method rejects in two cases: the call failed before the application ran (an invalid password, a duplicate operation ID), which leaves no history entry; or an error came with a report that claims success, which happens when deep persistence completes but its final journal write fails, and that report stays in `ListReports` history. The preview mock resolves reports the same way. Changing a bound method touches `app.go`, `guiapi`, the hand-written types in `src/services/api.ts`, and both the real and mock APIs in `services/wails.ts`. `TextInput` emits strings even for `type="number"`, and Wails cannot decode a string into a Go `int`: the native runtime rejects the call, while `wails dev` in a browser leaves it pending. `makeRequest` in `useOperations.ts` therefore converts ports with `toPort`; convert any new numeric field the same way. UI copy is Simplified Chinese.
+- **GUI styling.** All design values are `--rt-*` tokens in `src/styles/tokens.css`, with one block per theme (`[data-theme="light"]` 白瓷, `[data-theme="dark"]` 石墨) plus shared scale tokens. `tokens.test.ts` checks text and indicator contrast in both themes, and `tokenTrace.test.ts` fails on any undefined token, literal colour, or raw pixel size (other than 1px and query breakpoints) in a component; add a token instead of a literal. `createTheme` (`src/composables/useTheme.ts`) runs in `main.ts` before mount and is provided as `theme`; `App.vue` feeds the resolved theme and token values to Naive UI through `NConfigProvider`. Dashboard and sidebar summaries come from the pure helpers in `src/services/summary.ts`, which read only reports from this session.
+- **Test seams.** Protocol state machines run against `transport/shell.Shell` and are tested with in-memory fake shells. SSH, Telnet, and Xiaomi Web code are tested against loopback servers and `httptest`. RD08 tests replace unexported `Prober` fields (`sshDial`, `telnetDial`, `webLogin`, `macGenerator`, `sleep`, `probePort`).
+- **Deep journal stages** (`PRECHECK`, `CRASH_WRITE_STARTED`, `FLAGS_WRITE_STARTED`, `FINAL_VERIFY`, ...) are written in `internal/devices/xiaomi/rd08/v1_1_96/deep_persist.go` and interpreted for operators in `RECOVERY.md`. Rename them in both places.
+- `docs/rd08-protocol-spec.md` (in Chinese) is the binding RD08 protocol and safety specification.

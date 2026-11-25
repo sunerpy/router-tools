@@ -1,0 +1,35 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+
+formatters:
+  enable: [gofumpt, goimports]
+  settings:
+    gofumpt:
+      extra:
+        group-params: true
+    goimports:
+      local-prefixes: [github.com/sunerpy/router-tools]
+
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - errcheck
+    - govet
+    - ineffassign
+    - misspell
+    - staticcheck
+    - unconvert
+    - unused
+  exclusions:
+    generated: lax
+    rules:
+      - path: '\.pb\.go$'
+        linters: [all]
+      - path: _test\.go
+        linters: [bodyclose, errcheck, unused]
+      - path: vendor/
+        linters: [all]

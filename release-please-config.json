@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "include-component-in-tag": false,
+  "pull-request-title-pattern": "chore: release${component} ${version}",
+  "packages": {
+    ".": {
+      "release-type": "go",
+      "package-name": "router-tools",
+      "initial-version": "0.1.0",
+      "bump-minor-pre-major": true,
+      "include-v-in-tag": true,
+      "draft": true,
+      "force-tag-creation": true,
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "cmd/routergui/wails.json",
+          "jsonpath": "$.info.productVersion"
+        }
+      ]
+    }
+  }
+}

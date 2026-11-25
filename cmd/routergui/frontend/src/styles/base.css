@@ -1,0 +1,191 @@
+/* Bundled variable fonts (SIL OFL 1.1): nothing is fetched from the network. */
+@import "@fontsource-variable/instrument-sans/index.css";
+@import "@fontsource-variable/jetbrains-mono/index.css";
+@import "@fontsource-variable/noto-sans-sc/index.css";
+@import "./tokens.css";
+@import "./field.css";
+
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+}
+:root {
+  scrollbar-color: color-mix(in srgb, var(--rt-fg-muted) 45%, transparent) transparent;
+}
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+body {
+  font-family: var(--rt-font-ui);
+  font-size: var(--rt-text-md);
+  line-height: var(--rt-leading);
+  color: var(--rt-fg);
+  background: var(--rt-canvas);
+  -webkit-font-smoothing: antialiased;
+}
+h1,
+h2,
+h3 {
+  line-height: var(--rt-leading-tight);
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button,
+a,
+input,
+select,
+textarea {
+  transition:
+    background-color var(--rt-motion-fast) var(--rt-motion-ease),
+    border-color var(--rt-motion-fast) var(--rt-motion-ease),
+    color var(--rt-motion-fast) var(--rt-motion-ease);
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+a {
+  color: var(--rt-accent-text);
+}
+:focus-visible {
+  outline: var(--rt-focus-width) solid var(--rt-focus);
+  outline-offset: var(--rt-focus-width);
+}
+::selection {
+  background: var(--rt-accent-soft);
+}
+/* Lucide renders stroke-width="2"; CSS overrides the presentation attribute once for every icon. */
+.lucide {
+  flex: none;
+  stroke-width: var(--rt-icon-stroke);
+}
+code,
+pre,
+.mono {
+  font-family: var(--rt-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.muted {
+  color: var(--rt-fg-muted);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Layout primitives (DESIGN.md §2). */
+.cluster {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rt-space-3);
+}
+.stack {
+  display: grid;
+  gap: var(--rt-space-4);
+  min-width: 0;
+}
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--rt-space-4);
+}
+.split--even {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.tile-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--rt-space-4);
+}
+.list-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr);
+  align-items: start;
+  gap: var(--rt-space-4);
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--rt-badge-height);
+  padding: 0 var(--rt-space-2);
+  border: var(--rt-border-width) solid var(--rt-border);
+  border-radius: var(--rt-r-control);
+  background: var(--rt-inset);
+  color: var(--rt-fg-muted);
+  font-family: var(--rt-font-mono);
+  font-size: var(--rt-text-xs);
+}
+.lamp {
+  display: inline-block;
+  flex: none;
+  width: var(--rt-lamp-size);
+  height: var(--rt-lamp-size);
+  border-radius: var(--rt-r-pill);
+  background: var(--rt-fg-muted);
+  box-shadow: 0 0 0 var(--rt-lamp-halo) color-mix(in srgb, currentColor 18%, transparent);
+}
+.lamp--ok {
+  color: var(--rt-ok);
+  background: var(--rt-ok);
+}
+.lamp--warn {
+  color: var(--rt-warning);
+  background: var(--rt-warning);
+}
+.lamp--danger {
+  color: var(--rt-danger);
+  background: var(--rt-danger);
+}
+.lamp--neutral {
+  color: var(--rt-fg-muted);
+}
+@media (max-width: 1024px) {
+  .split,
+  .split--even,
+  .list-detail {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tile-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 480px) {
+  .tile-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.rt-theme-switching *,
+.rt-theme-switching *::before,
+.rt-theme-switching *::after {
+  transition: none !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+  }
+}
