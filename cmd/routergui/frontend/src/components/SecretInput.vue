@@ -11,6 +11,8 @@ defineProps<{
   error?: string;
   required?: boolean;
   disabled?: boolean;
+  /** current-password for an existing secret, new-password for one being set. */
+  autocomplete?: "current-password" | "new-password";
 }>();
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();
 const visible = ref(false);
@@ -24,7 +26,7 @@ const visible = ref(false);
         class="rt-field__control secret-input__control"
         :value="modelValue"
         :type="visible ? 'text' : 'password'"
-        autocomplete="current-password"
+        :autocomplete="autocomplete ?? 'current-password'"
         autocapitalize="off"
         spellcheck="false"
         :disabled="disabled"

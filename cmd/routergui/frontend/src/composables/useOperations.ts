@@ -32,12 +32,12 @@ function loadPreferences() {
 // binding only decodes integers that fit its int type; anything else fails to
 // decode before the application runs. A value that is not a TCP port becomes 0,
 // which the application rejects as an invalid argument before network access.
-function toPort(value: unknown): number {
+export function toPort(value: unknown): number {
   const port = typeof value === "string" && value.trim() === "" ? Number.NaN : Number(value);
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : 0;
 }
 
-function newOperationID(): string {
+export function newOperationID(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
     return crypto.randomUUID();
   return `${Date.now()}-${Math.random().toString(16).slice(2)}`;

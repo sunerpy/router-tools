@@ -32,6 +32,7 @@ type fakeApplication struct {
 	applyErr          error
 	ackTarget         device.Target
 	credentialEntries []credentials.Entry
+	deepStatusRequest app.DeepStatusRequest
 	forgetFilter      credentials.Filter
 	forgotAll         bool
 }
@@ -106,6 +107,11 @@ func (f *fakeApplication) GuideApply(_ context.Context, request app.GuideApplyRe
 func (f *fakeApplication) AcknowledgeRecovery(_ context.Context, target device.Target) (app.RecoveryReport, error) {
 	f.ackTarget = target
 	return app.RecoveryReport{Status: app.StatusSucceeded, Acknowledged: true}, nil
+}
+
+func (f *fakeApplication) DeepStatus(_ context.Context, request app.DeepStatusRequest, _ app.EventSink) (app.DeepStatusReport, error) {
+	f.deepStatusRequest = request
+	return app.DeepStatusReport{Operation: "deep status", Status: app.StatusSucceeded, Ready: true}, nil
 }
 
 func (f *fakeApplication) ListCredentials() (app.CredentialReport, error) {

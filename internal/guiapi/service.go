@@ -33,6 +33,7 @@ type Application interface {
 	GuidePlan(context.Context, app.GuideRequest, app.EventSink) (app.GuidePlanReport, error)
 	GuideApply(context.Context, app.GuideApplyRequest, app.EventSink) (app.GuideApplyReport, error)
 	AcknowledgeRecovery(context.Context, device.Target) (app.RecoveryReport, error)
+	DeepStatus(context.Context, app.DeepStatusRequest, app.EventSink) (app.DeepStatusReport, error)
 	ListCredentials() (app.CredentialReport, error)
 	ForgetCredentials(credentials.Filter) (app.CredentialReport, error)
 	ForgetAllCredentials() (app.CredentialReport, error)
@@ -410,6 +411,24 @@ func (s *Service) AcknowledgeRecovery(ctx context.Context, request OperationRequ
 	defer finish()
 	report, err := s.application.AcknowledgeRecovery(operationCtx, request.Target)
 	return report, s.settle(request.OperationID, "recovery ack", report, report.Status, err)
+}
+
+// DeepStatus reads the deep-persistence page's state without changing the router. It keeps no history.
+func (s *Service) DeepStatus(ctx context.Context, request OperationRequest) (app.DeepStatusReport, error) {
+	operationCtx, finish, err := s.start(ctx, request.OperationID)
+	if err != nil {
+		return app.DeepStatusReport{}, err
+	}
+	defer finish()
+	root, err := request.rootPassword()
+	if err != nil {
+		return app.DeepStatusReport{}, err
+	}
+	report, err := s.application.DeepStatus(operationCtx, app.DeepStatusRequest{
+		Target: request.Target, ProfileID: request.ProfileID, RootPassword: root,
+		HostKeyPolicy: s.hostPolicy(request), Credentials: request.credentials(),
+	}, s.events(request.OperationID))
+	return report, resolution(report.Status, err)
 }
 
 // CredentialStatus lists the saved passwords' metadata; no binding ever returns a password.

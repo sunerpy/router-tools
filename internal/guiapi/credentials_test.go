@@ -54,3 +54,23 @@ func TestCredentialBindingsPassMetadataOnly(t *testing.T) {
 		t.Fatal("credential management is not a device operation and must stay out of the run history")
 	}
 }
+
+func TestDeepStatusPassesThroughWithoutHistory(t *testing.T) {
+	t.Parallel()
+
+	application := &fakeApplication{}
+	service := guiapi.New(application, nil, nil)
+	report, err := service.DeepStatus(t.Context(), guiapi.OperationRequest{
+		OperationID: "deep-status", Target: device.DefaultTarget(), RootPassword: "root-secret", UseSavedPassword: true,
+	})
+	if err != nil || !report.Ready {
+		t.Fatalf("DeepStatus() = %+v, %v", report, err)
+	}
+	request := application.deepStatusRequest
+	if request.RootPassword.Expose() != "root-secret" || !request.Credentials.UseSaved {
+		t.Fatalf("request = %+v", request)
+	}
+	if len(service.ListReports()) != 0 {
+		t.Fatal("a read-only status check must stay out of the run history")
+	}
+}

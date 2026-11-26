@@ -22,6 +22,7 @@ const PRESENTATION: Record<string, { label: string; tone: Tone; icon: Component;
     unknown: { label: "结果未知", tone: "warn", icon: AlertTriangle },
     failed: { label: "失败", tone: "danger", icon: XCircle },
     skipped: { label: "已跳过", tone: "neutral", icon: MinusCircle },
+    not_run: { label: "未执行", tone: "neutral", icon: Circle },
     idle: { label: "未运行", tone: "neutral", icon: Circle },
     canceling: { label: "正在取消", tone: "neutral", icon: LoaderCircle, spin: true },
     canceled: { label: "已取消", tone: "neutral", icon: Ban },

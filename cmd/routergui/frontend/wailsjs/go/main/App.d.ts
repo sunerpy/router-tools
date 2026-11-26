@@ -20,6 +20,8 @@ export function CredentialStatus():Promise<app.CredentialReport>;
 
 export function DeepPersist(arg1:guiapi.OperationRequest):Promise<app.DeepReport>;
 
+export function DeepStatus(arg1:guiapi.OperationRequest):Promise<app.DeepStatusReport>;
+
 export function Doctor(arg1:guiapi.OperationRequest):Promise<app.DoctorReport>;
 
 export function EnableSSH(arg1:guiapi.OperationRequest):Promise<app.EnableReport>;

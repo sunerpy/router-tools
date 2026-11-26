@@ -1,32 +1,47 @@
 <script setup lang="ts">
-import { computed, inject, provide } from "vue";
+import { computed, inject, provide, ref } from "vue";
 import { useRoute } from "vue-router";
 import { NConfigProvider, darkTheme } from "naive-ui";
 import {
-  Activity,
-  Database,
   FileClock,
   Fingerprint,
-  HeartPulse,
   Moon,
   Router as RouterIcon,
   Settings,
   Shapes,
   ShieldAlert,
-  ShieldCheck,
+  Sparkles,
   Sun,
+  Wrench,
 } from "lucide-vue-next";
+import { useGuide } from "./composables/useGuide";
 import { useOperations } from "./composables/useOperations";
 import type { ThemeController } from "./composables/useTheme";
 import { createAPI, isPreview } from "./services/wails";
-import { latestEntry, targetStatus } from "./services/summary";
+import { guideStatus, latestEntry, targetStatus } from "./services/summary";
+import type { CatalogEntry } from "./services/api";
 import { documentTokens, naiveOverrides } from "./styles/naiveTheme";
 import HostKeyDialog from "./components/HostKeyDialog.vue";
 import StatusBadge from "./components/StatusBadge.vue";
 
 const theme = inject("theme") as ThemeController;
-const store = useOperations(createAPI());
+const api = createAPI();
+const store = useOperations(api);
+const guide = useGuide(api, store);
+const catalog = ref<CatalogEntry[]>([]);
+api
+  .Catalog()
+  .then((entries) => (catalog.value = entries ?? []))
+  .catch(() => {});
+provide("api", api);
 provide("operations", store);
+provide("guide", guide);
+provide("catalog", catalog);
+const showPrimitives = import.meta.env.DEV;
+// The guide keeps its own run state; the other pages share the operations store.
+const headerStatus = computed(() =>
+  route.name === "guide" ? guideStatus(guide.phase, guide.run, guide.error) : store.status,
+);
 const route = useRoute();
 
 const naiveTheme = computed(() => (theme.resolved.value === "dark" ? darkTheme : null));
@@ -42,25 +57,28 @@ const navigation = computed(() => [
   {
     label: "设备",
     items: [
-      { to: "/", label: "设备预检", icon: HeartPulse },
-      { to: "/enable", label: "开启 SSH", icon: ShieldCheck },
-      { to: "/persistence", label: "软固化与重启", icon: Activity },
-      { to: "/backup", label: "分区备份", icon: Database },
+      { to: "/", label: "向导", icon: Sparkles },
+      { to: "/tools", label: "维护", icon: Wrench },
     ],
   },
   { label: "高风险", items: [{ to: "/deep", label: "深度固化", icon: ShieldAlert, risk: true }] },
   {
     label: "记录",
-    items: [{ to: "/reports", label: "运行报告", icon: FileClock, count: store.history.length }],
+    items: [
+      { to: "/reports", label: "运行报告", icon: FileClock, count: store.history.length },
+      { to: "/settings", label: "设置", icon: Settings },
+    ],
   },
 ]);
 
-const latestDoctor = computed(() =>
-  store.operation === "Doctor" && store.report
+// The sidebar summarizes the latest detection: the guide's plan, or a preflight from 维护.
+const latestDetection = computed(() => {
+  if (guide.plan) return guide.plan;
+  return store.operation === "Doctor" && store.report
     ? store.report
-    : (latestEntry(store.history, "doctor")?.report as any),
-);
-const target = computed(() => targetStatus(latestDoctor.value, store.target.host));
+    : (latestEntry(store.history, "doctor")?.report as any);
+});
+const target = computed(() => targetStatus(latestDetection.value, store.target.host));
 const hostKeyLabel = computed(() => {
   if (store.hostKey.PinSHA256) return "已固定主机密钥指纹";
   if (store.hostKey.AcceptNew) return "自动接受未知主机密钥";
@@ -107,9 +125,6 @@ const hostKeyLabel = computed(() => {
           </p>
         </section>
         <div class="app-sidebar__buttons">
-          <RouterLink to="/settings" class="app-square" aria-label="连接设置" title="连接设置">
-            <Settings :size="18" aria-hidden="true" />
-          </RouterLink>
           <button
             type="button"
             class="app-square"
@@ -120,7 +135,13 @@ const hostKeyLabel = computed(() => {
             <Sun v-if="theme.resolved.value === 'dark'" :size="18" aria-hidden="true" />
             <Moon v-else :size="18" aria-hidden="true" />
           </button>
-          <RouterLink to="/primitives" class="app-square" aria-label="设计原语" title="设计原语">
+          <RouterLink
+            v-if="showPrimitives"
+            to="/primitives"
+            class="app-square"
+            aria-label="设计原语"
+            title="设计原语"
+          >
             <Shapes :size="18" aria-hidden="true" />
           </RouterLink>
         </div>
@@ -132,7 +153,7 @@ const hostKeyLabel = computed(() => {
             <p>{{ route.meta.description }}</p>
             <p v-if="isPreview" class="app-preview">浏览器预览 · 模拟数据，不连接路由器</p>
           </div>
-          <StatusBadge :status="store.status" />
+          <StatusBadge :status="headerStatus" />
         </header>
         <main class="operation-content">
           <RouterView />
@@ -314,6 +335,9 @@ const hostKeyLabel = computed(() => {
   font-size: var(--rt-text-xs);
 }
 .operation-content {
+  /* The containing block for absolutely positioned descendants (for example visually hidden text),
+     so they scroll with the page instead of growing the window's own scroll area. */
+  position: relative;
   min-width: 0;
   min-height: 0;
   overflow: auto;

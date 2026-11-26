@@ -19,7 +19,7 @@ The word “temporary” applies only to the usual Dropbear-script lifetime. It 
 
 ## Guided setup
 
-`setup` asks for one confirmation that covers several writes (the desktop wizard follows with the guided redesign): the confirmation lists every planned step and its effects, including the root password change, the committed NVRAM switches, the managed boot script and firewall include, and the reboot. Read the whole list before confirming.
+`setup` and the desktop 向导 page ask for one confirmation that covers several writes: the confirmation lists every planned step and its effects, including the root password change, the committed NVRAM switches, the managed boot script and firewall include, and the reboot. Read the whole list before confirming.
 
 The router can change between detection and the run. The run therefore detects again first and stops before any write if the device, the profile or any step would do more or something else than you confirmed; you then have to detect and confirm again. Steps may only do less (for example skip a backup that appeared meanwhile). A step decided after SSH works may only install the soft persistence that was listed.
 
@@ -29,7 +29,7 @@ The router is identified by its normalized address, not by its ports: one lock, 
 
 ## Saved passwords
 
-`--remember-password` saves a typed Web admin or root password after the router accepted it, in `<user config dir>/routerctl/credentials/` (the desktop request supports the same choice; its switch arrives with the guided redesign). Each password is encrypted with AES-256-GCM. On every platform, any program running as your user can decrypt the saved passwords. On Windows the vault key is additionally protected with DPAPI, so a copied `vault.key` is useless under another account or on another computer; on macOS and Linux the key is a 0600 file, and copying `vault.json` together with `vault.key` is enough to decrypt. This protects against casual viewing and against someone copying only `vault.json`; it is not a master password. Uninstalling the app does not delete the vault; `routerctl credentials forget --all` does.
+`--remember-password` saves a typed Web admin or root password after the router accepted it, in `<user config dir>/routerctl/credentials/` (on the desktop, the 记住密码 switch of the 向导 page, off each time the page opens). Each password is encrypted with AES-256-GCM. On every platform, any program running as your user can decrypt the saved passwords. On Windows the vault key is additionally protected with DPAPI, so a copied `vault.key` is useless under another account or on another computer; on macOS and Linux the key is a 0600 file, and copying `vault.json` together with `vault.key` is enough to decrypt. This protects against casual viewing and against someone copying only `vault.json`; it is not a master password. Uninstalling the app does not delete the vault; `routerctl credentials forget --all` does.
 
 A saved root password is never sent over Telnet and never to an SSH host key that was not already known, pinned or confirmed by you. A saved password the router refuses is marked rejected and not used again until you type the right one and save it again with `--remember-password`. Deep persistence never uses saved passwords.
 

@@ -10,6 +10,9 @@ import AppSegmented from "../components/AppSegmented.vue";
 import AppStepper from "../components/AppStepper.vue";
 import AppToggle from "../components/AppToggle.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
+import CredentialState from "../components/CredentialState.vue";
+import DeviceSelector from "../components/DeviceSelector.vue";
+import PlanStepList from "../components/PlanStepList.vue";
 import EmptyState from "../components/EmptyState.vue";
 import HistoryList from "../components/HistoryList.vue";
 import OperationProgress from "../components/OperationProgress.vue";
@@ -19,6 +22,7 @@ import StatTile from "../components/StatTile.vue";
 import StatusBadge from "../components/StatusBadge.vue";
 import TextInput from "../components/TextInput.vue";
 import type { ThemeController, ThemePreference } from "../composables/useTheme";
+import type { CatalogEntry, GuideStep, GuideStepResult } from "../services/api";
 
 const theme = inject("theme") as ThemeController;
 const appearance = computed({
@@ -39,10 +43,62 @@ const statuses = [
   "unknown",
   "failed",
   "skipped",
+  "not_run",
   "canceling",
   "canceled",
 ];
 const report = { status: "partial", operation: "enable", message: "X".repeat(500) };
+const sampleCatalog: CatalogEntry[] = [
+  {
+    model_id: "xiaomi-rd08",
+    vendor: "Xiaomi",
+    model: "BE6500 Pro",
+    hardware: "RD08",
+    profiles: [
+      {
+        id: "xiaomi-rd08-1.1.96",
+        model_id: "xiaomi-rd08",
+        vendor: "Xiaomi",
+        model: "BE6500 Pro",
+        hardware: "RD08",
+        firmware: "1.1.96",
+        capabilities: [],
+      },
+    ],
+  },
+];
+const profileChoice = ref("auto");
+const staleProfile = ref("xiaomi-rd08-9.9.9");
+const planSteps: GuideStep[] = [
+  {
+    id: "enable_ssh",
+    action: "run",
+    reason: "ssh_closed",
+    effects: ["temporary_mac_rules", "nvram_commit", "root_password_change"],
+  },
+  { id: "backup", action: "skip", reason: "backup_verified" },
+  {
+    id: "soft_install",
+    action: "decide_after",
+    reason: "after_ssh",
+    effects: ["script_write", "uci_commit"],
+  },
+  { id: "reboot_verify", action: "needs_input", reason: "root_password_missing" },
+];
+const blockedSteps: GuideStep[] = [
+  { id: "soft_install", action: "blocked", reason: "soft_conflict", maintenance: "manual_review" },
+  { id: "reboot_verify", action: "unsupported", reason: "capability_missing" },
+];
+const results: GuideStepResult[] = [
+  { id: "enable_ssh", action: "run", status: "succeeded" },
+  {
+    id: "backup",
+    action: "run",
+    status: "failed",
+    error: { code: "BACKUP_INCOMPLETE", message: "第 4 个分区读取长度不符" },
+  },
+  { id: "soft_install", action: "not_run", status: "not_run" },
+];
 const events = [
   { stage: "PRECHECK", status: "succeeded" },
   { stage: "CRASH_WRITE_STARTED", status: "running" },
@@ -221,6 +277,20 @@ const rows = [
       />
     </div>
 
+    <AppCard title="引导元件">
+      <div class="stack">
+        <DeviceSelector id="primitive-device" v-model="profileChoice" :catalog="sampleCatalog" />
+        <DeviceSelector id="primitive-stale" v-model="staleProfile" :catalog="sampleCatalog" />
+        <div class="cluster">
+          <CredentialState kind="web-admin" state="saved" />
+          <CredentialState kind="root" state="rejected" />
+          <CredentialState kind="root" state="none" />
+        </div>
+        <PlanStepList :steps="planSteps" />
+        <PlanStepList :steps="blockedSteps" />
+        <PlanStepList :results="results" />
+      </div>
+    </AppCard>
     <AppCard title="步骤与记录">
       <div class="stack">
         <AppStepper :steps="['前置证据', '凭据与明文风险', '最终确认']" :current="2" />

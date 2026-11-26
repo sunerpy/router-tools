@@ -74,6 +74,13 @@ describe("preview API", () => {
     expect(report.profile).toEqual(catalog[0].profiles[0]);
   });
 
+  it("keeps the deep journal in the managed directory that the deep status shows", async () => {
+    const api = createAPI();
+    const status = await api.DeepStatus(makeRequest());
+    const report = await api.DeepPersist({ ...makeRequest(), RunDir: "" });
+    expect(report.journal_path).toBe(status.journal_path);
+  });
+
   it("keeps the success scenario as the default", async () => {
     const api = createAPI();
     const report = await api.Doctor(makeRequest());

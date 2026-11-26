@@ -80,7 +80,7 @@ Primitives: `fixed-sidenav-shell`, `scroll-body-shell`, `split`, `tile-grid`, `c
 .app-workspace    grid-template-rows: auto minmax(0, 1fr)
 ```
 
-- Sidebar: brand row, grouped navigation (设备 / 高风险 / 记录; only the navigation list scrolls), the current-target card, and three square buttons (连接设置, 主题, 设计原语).
+- Sidebar: brand row, grouped navigation (设备: 向导, 维护 / 高风险: 深度固化 / 记录: 运行报告, 设置; only the navigation list scrolls), the current-target card, and square buttons (主题, and 设计原语 in development builds only). The step-by-step routes of v1 (`/enable`, `/persistence`, `/backup`) redirect to `/`.
 - Page header: title and one-sentence description on the left, the operation status badge on the right. It never scrolls away.
 - `.operation-content` is the only routine page-scroll owner (`min-height: 0`, `overflow: auto`), centred at `--rt-content-max` 1200 px.
 - `split`: `minmax(0, 1.65fr) minmax(0, 1fr)` above 1024 px, one column below. `tile-grid`: four tracks above 1024 px, two up to 480 px, one below.
@@ -98,7 +98,7 @@ Primitives: `fixed-sidenav-shell`, `scroll-body-shell`, `split`, `tile-grid`, `c
 - `AppButton`: primary (ink) / secondary (outline) / ghost / danger; default and `sm`; default, hover, focus, active, disabled and loading states; accessible busy state.
 - `AppIconButton`: 32 px square (44 px on coarse pointers), required accessible name, same states as `AppButton` including loading with `aria-busy`.
 - `AppBadge`: pill with icon + text; tones ok / warn / danger / info / neutral.
-- `StatusBadge`: maps an operation status to `AppBadge`: succeeded 成功, running 运行中, partial 部分完成, unknown 结果未知, failed 失败, skipped 已跳过, idle 未运行, canceling 正在取消, canceled 已取消; anything else shows the raw value in neutral.
+- `StatusBadge`: maps an operation status to `AppBadge`: succeeded 成功, running 运行中, partial 部分完成, unknown 结果未知, failed 失败, skipped 已跳过, not_run 未执行, idle 未运行, canceling 正在取消, canceled 已取消; anything else shows the raw value in neutral.
 - `AppToggle`: switch built on a native checkbox with `role="switch"`, persistent label and optional note.
 - `AppSegmented`: native radio group drawn as a segmented control.
 - `FormField`, `TextInput`, `SecretInput`: persistent label, hint, required marker, linked error, disabled and read-only states, show/hide secret control.
@@ -111,19 +111,26 @@ Primitives: `fixed-sidenav-shell`, `scroll-body-shell`, `split`, `tile-grid`, `c
 - `OperationProgress`: stage list with completed / running / failed states, bounded overflow and the non-retry warning.
 - `ReportViewer`: formatted JSON, copy and download actions, long-content wrapping and independent scroll.
 - `EmptyState`: explains the next concrete action rather than displaying a spinner.
+- `DeviceSelector`: two native selects, 型号 (自动识别 or a catalog model) and 固件 (that model's registered firmware), producing `auto` or one exact profile ID. A stored profile ID that is no longer registered shows an inline warning and is kept until the user picks another; it is never rewritten silently.
+- `PlanStepList`: the ordered guided steps as a list. Each row has an icon chip, the step title, an action badge (将执行 / 已满足 / SSH 可用后判断 / 需要输入 / 已阻止 / 不支持), the reason as a sentence, and the effects the step would have. In result mode the badge is the step's `StatusBadge` (成功, 失败, 部分完成, 结果未知, 已跳过, 未执行) and a failed step shows its error code and message.
+- `CredentialState`: one badge per saved password kind: 已保存 (ok), 已被拒绝 (warn) or 未保存 (neutral), with the kind as text. It never shows or reveals a value.
 
 ## 4. Interaction and state
 
 - Buttons disable while their own operation is pending; navigation remains available unless an operation explicitly blocks unsafe context switching.
 - Form validation is per-form before calling Go or opening a confirmation (`useFieldErrors`): failed rules show under their fields, link through `aria-describedby`, and focus moves to the first invalid field. Persistent labels remain after input; required inputs carry `aria-required`.
 - Option switches are `AppToggle`; a switch that enables a plaintext protocol carries the note 明文.
-- Ordinary changes require a confirmation dialog each time; there is no remembered "always allow".
-- Deep persistence is a dedicated flow shown with `AppStepper`: evidence checklist and backup/run paths → credentials and Telnet risk acknowledgement → exact `RD08-DEEP` → final destructive confirmation. The checklist names the checks the tool performs before any write; it never shows them as passed before a run has produced that evidence. No default selection and no ordinary-yes shortcut.
+- Ordinary changes started from 维护 require a confirmation dialog each time; there is no remembered "always allow".
+- A guided run has exactly one confirmation dialog. It lists every planned write with its effects in plain words (including the root password change, the committed NVRAM switches, the managed boot script and firewall include, and the reboot), marks steps decided once SSH works, and states that the run stops at the first step that does not succeed. It names the router the plan was detected for (address and ports, hardware, firmware, profile). Default focus is 取消, and the confirmation is never remembered. Changing the address, ports, device, goals or 使用已保存的密码 after detection withholds the run until the next detection; a running detection or run offers 取消. The run sends the plan's confirmation back unchanged; when the run reports that the plan changed, the window shows the fresh detection instead of retrying.
+- The guided page asks only for the inputs the current plan needs: the Web admin password and the new root password (twice, `autocomplete="new-password"`) when the enable step runs, otherwise the current root password (`autocomplete="current-password"`). A password the vault provides is shown as `CredentialState`, not as a field. Resetting an unknown root password is its own explicit choice with the effect stated next to it.
+- 使用已保存的密码 is on and 记住密码 is off when the page opens; neither is stored. Remembering happens only after the router accepted the password.
+- When detection is blocked by an unacknowledged uncertain change, the page shows the router, the recorded operation, its status and times, the instruction to check the router as RECOVERY.md describes, and an acknowledgement action with its own confirmation. When the firmware is not registered, the page lists the model's registered firmware; switching to a profile is offered only for an exact registered match and only on the user's click.
+- Deep persistence is a dedicated flow shown with `AppStepper`: evidence checklist and backup choice → credentials and Telnet risk acknowledgement → the resolved profile's exact acknowledgement phrase → final destructive confirmation. The phrase and the number of reboots come from the profile `DeepStatus` resolved; they are displayed and never prefilled. The journal directory is the managed one and is shown read-only; the backup is chosen from the verified managed backups or another directory picked with the system dialog. The checklist names the checks the tool performs before any write and shows what `DeepStatus` read (journal present, flags already set, crash partition readable); it never shows a run's checks as passed before the run produced that evidence. No default selection and no ordinary-yes shortcut.
 - Host-key confirmation displays address, algorithm, and full SHA-256 fingerprint with accept-and-save (trust on first use: the key is written to known_hosts) or cancel. Changed keys cannot be confirmed away.
 - Partial/unknown results keep the report visible and show "do not retry from the beginning" where applicable; a canceled run that may have written keeps its partial or unknown status.
 - Password fields and the deep acknowledgement are cleared immediately after the backend call is dispatched, when a confirmation is canceled, and when the page that holds them unmounts. The deep flow's Telnet acknowledgement is its own switch, unset whenever the page opens. None of these is stored in localStorage or report JSON.
 - Only target/profile/host-key preferences and the appearance preference may use localStorage. No secrets or deep acknowledgement are persisted by the window. Saved passwords exist only in the Go vault, saved after the user opts in and the router accepted them; the window receives only whether a password is saved or was rejected, never its value.
-- Device summaries, port tiles, the next-step suggestion and recent operations are derived from reports the backend returned in this session and from the target each run was sent to, never from the edited form; before a report exists they show an empty state, never placeholder data. A newer partial or unknown write makes the next step "view the report, do not start over".
+- The sidebar's target status and the report list are derived from reports the backend returned in this session and from the target each run was sent to, never from the edited form; before a report exists they show an empty state, never placeholder data. Partial or unknown results keep "do not start over" on the guided result card and the deep-persistence record card.
 - The operation stage list shows one row per stage: a stage is completed once the next one starts, and the terminal result belongs to the stage that was running.
 
 ## 5. Motion

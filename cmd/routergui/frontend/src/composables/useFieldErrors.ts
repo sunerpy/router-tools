@@ -43,18 +43,31 @@ export function hostError(value: unknown): string {
   return "";
 }
 
-/** Rules for the target form fields on the dashboard and settings pages. */
-export function targetRules(
-  target: { host: string; web_port: unknown; ssh_port: unknown; telnet_port: unknown },
-  profileID: string,
-): FieldRule[] {
+/** Rules for the target form fields (address and ports). */
+export function targetRules(target: {
+  host: string;
+  web_port: unknown;
+  ssh_port: unknown;
+  telnet_port: unknown;
+}): FieldRule[] {
   return [
     ["target-host", !hostError(target.host), hostError(target.host)],
     ["target-web-port", !portError(target.web_port), portError(target.web_port)],
     ["target-ssh-port", !portError(target.ssh_port), portError(target.ssh_port)],
     ["target-telnet-port", !portError(target.telnet_port), portError(target.telnet_port)],
-    ["target-profile", profileID.trim() !== "", "请输入 Profile，或使用 auto"],
   ];
+}
+
+/** The selected profile must be auto or registered; a stale stored ID is flagged, not sent. */
+export function profileRule(
+  id: string,
+  profileID: string,
+  catalog: Array<{ profiles: Array<{ id: string }> }>,
+): FieldRule {
+  const registered =
+    profileID === "auto" ||
+    catalog.some((entry) => entry.profiles.some((profile) => profile.id === profileID));
+  return [id, registered, "请重新选择型号与固件"];
 }
 
 /** A rule that a required text value is present. */

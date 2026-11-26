@@ -59,13 +59,24 @@ type ManagedBackup struct {
 // latestManagedBackup returns the newest managed backup that passes local verification and records the
 // identity of the current device and profile; nil when there is none.
 func (s *Service) latestManagedBackup(target device.Target, observation device.Observation, profile device.Profile) *ManagedBackup {
-	if s.backupRoot == "" {
+	backups := s.managedBackups(target, observation, profile, 1)
+	if len(backups) == 0 {
 		return nil
+	}
+	return &backups[0]
+}
+
+// managedBackups returns up to limit managed backups, newest first, that pass local verification and
+// record the identity of the current device and profile. At most 50 directories are examined.
+func (s *Service) managedBackups(target device.Target, observation device.Observation, profile device.Profile, limit int) []ManagedBackup {
+	found := []ManagedBackup{}
+	if s.backupRoot == "" {
+		return found
 	}
 	root := s.managedBackupDir(target, profile)
 	entries, err := os.ReadDir(root)
 	if err != nil {
-		return nil
+		return found
 	}
 	var names []string
 	for _, entry := range entries {
@@ -78,7 +89,7 @@ func (s *Service) latestManagedBackup(target device.Target, observation device.O
 	sort.Sort(sort.Reverse(sort.StringSlice(names)))
 	want := backupIdentity(observation, profile)
 	for i, name := range names {
-		if i >= 50 {
+		if i >= 50 || len(found) >= limit {
 			break
 		}
 		dir := filepath.Join(root, name)
@@ -89,7 +100,7 @@ func (s *Service) latestManagedBackup(target device.Target, observation device.O
 		if err != nil || !manifest.Complete || !sameBackupIdentity(manifest.Device, want) {
 			continue
 		}
-		return &ManagedBackup{Path: dir, CreatedAt: manifest.CreatedAt, BootID: manifest.BootID}
+		found = append(found, ManagedBackup{Path: dir, CreatedAt: manifest.CreatedAt, BootID: manifest.BootID})
 	}
-	return nil
+	return found
 }
