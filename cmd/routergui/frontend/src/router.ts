@@ -1,4 +1,5 @@
 import { createRouter, createWebHashHistory, type RouteRecordRaw } from "vue-router";
+import AgentView from "./views/AgentView.vue";
 import DeepView from "./views/DeepView.vue";
 import GuideView from "./views/GuideView.vue";
 import PrimitivesView from "./views/PrimitivesView.vue";
@@ -41,6 +42,16 @@ const routes: RouteRecordRaw[] = [
       title: "深度固化",
       description:
         "写入并擦除 MTD、修改 bdata，并按 profile 重启多次 · 只在独立授权、可恢复的测试设备上使用",
+    },
+  },
+  {
+    path: "/agents",
+    name: "agents",
+    component: AgentView,
+    meta: {
+      title: "Agent 接入",
+      description:
+        "让 Claude Code、Codex 等 Agent 通过 MCP 使用检测、备份和引导流程 · 写入路由器需要你单独开启",
     },
   },
   {

@@ -2,6 +2,7 @@ import {
   formatTime,
   guideStatus,
   latestEntry,
+  latestOwnEntry,
   operationLabel,
   recentOperations,
   stageList,
@@ -60,6 +61,24 @@ describe("latestEntry", () => {
     ];
     expect(latestEntry(history, "doctor")?.operation_id).toBe("d2");
     expect(latestEntry(history, "deep-persist")).toBeUndefined();
+  });
+
+  it("skips runs an agent started when the window summarizes its own detection", () => {
+    const history = [
+      {
+        ...entry(
+          "doctor",
+          { status: "failed", host: "192.168.31.2" },
+          "2026-11-25T06:00:00Z",
+          "a1",
+        ),
+        source: "agent",
+      },
+      entry("doctor", doctorOK, "2026-11-25T05:00:00Z", "d1"),
+    ];
+    expect(latestEntry(history, "doctor")?.operation_id).toBe("a1");
+    expect(latestOwnEntry(history, "doctor")?.operation_id).toBe("d1");
+    expect(latestOwnEntry(history.slice(0, 1), "doctor")).toBeUndefined();
   });
 });
 

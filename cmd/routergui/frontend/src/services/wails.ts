@@ -1,4 +1,10 @@
 import type {
+  AgentActivity,
+  AgentHost,
+  AgentListenerStatus,
+  AgentOperation,
+  AgentSetup,
+  AgentStatus,
   CatalogEntry,
   CredentialEntry,
   CredentialReport,
@@ -61,12 +67,134 @@ export function createAPI(): RouterAPI {
       ResolveHostKey: (id, accept) => app.ResolveHostKey(id, accept),
       OnProgress: (callback) => window.runtime!.EventsOn("operation:progress", callback),
       OnHostKey: (callback) => window.runtime!.EventsOn("hostkey:confirm", callback),
+      OnHostKeyExpired: (callback) => window.runtime!.EventsOn("hostkey:expired", callback),
+      AgentStatus: () => app.AgentStatus(),
+      AgentApply: (change) => app.AgentApply(change),
+      AgentNewToken: () => app.AgentNewToken(),
+      AgentSetup: (agent) => app.AgentSetup(agent),
+      AgentInstallSkill: (request) => app.AgentInstallSkill(request),
+      AgentCancel: (id) => app.AgentCancel(id),
+      OnAgentStatus: (callback) => window.runtime!.EventsOn("agent:status", callback),
     };
   }
   if (isPreview) return createMockAPI();
   const missing = () =>
     Promise.reject(new Error("Wails 后端绑定不可用；请使用桌面应用而不是静态页面。"));
   return new Proxy({} as RouterAPI, { get: () => missing });
+}
+
+// Preview-only agent hosts, shaped like agentsetup.Agents().
+const previewAgents: AgentHost[] = [
+  { id: "claude-code", name: "Claude Code", http: true, skill_dir: ".claude/skills" },
+  { id: "codex", name: "Codex CLI", http: true, skill_dir: ".agents/skills" },
+  { id: "opencode", name: "opencode", http: true, skill_dir: ".agents/skills" },
+  { id: "pi", name: "pi", http: true, skill_dir: ".agents/skills" },
+  { id: "dsh", name: "DeepSeek Harness", http: true, skill_dir: ".agents/skills" },
+  { id: "workbuddy", name: "WorkBuddy", http: false },
+  { id: "generic", name: "Other MCP clients", http: true },
+];
+
+// Where the preview "installs" each host's skill (Go resolves real paths with the hosts' override variables).
+const previewSkillPaths: Record<string, string> = Object.fromEntries(
+  previewAgents
+    .filter((host) => host.skill_dir)
+    .map((host) => [host.id, `~/${host.skill_dir}/router-tools`]),
+);
+
+function previewSetup(agent: string, url: string): AgentSetup {
+  const bearer = (form: string) => ({ Authorization: `Bearer ${form}` });
+  const json = (value: unknown) => JSON.stringify(value, null, 2) + "\n";
+  switch (agent) {
+    case "claude-code":
+      return {
+        agent,
+        transport: "http",
+        format: "json",
+        file: "~/.claude.json",
+        snippet: json({
+          mcpServers: {
+            "router-tools": { type: "http", url, headers: bearer("${ROUTERCTL_MCP_TOKEN}") },
+          },
+        }),
+        command: `claude mcp add-json router-tools '${JSON.stringify({ type: "http", url, headers: bearer("${ROUTERCTL_MCP_TOKEN}") })}' --scope user`,
+        notes: [
+          "在启动 Claude Code 的环境中设置 ROUTERCTL_MCP_TOKEN；Claude Code 会在请求头中展开 ${ROUTERCTL_MCP_TOKEN}。",
+        ],
+      };
+    case "codex":
+      return {
+        agent,
+        transport: "http",
+        format: "toml",
+        file: "~/.codex/config.toml",
+        snippet: `[mcp_servers.router-tools]\nurl = "${url}"\nbearer_token_env_var = "ROUTERCTL_MCP_TOKEN"\n`,
+        command: `codex mcp add router-tools --url ${url} --bearer-token-env-var ROUTERCTL_MCP_TOKEN`,
+        notes: ["Codex 会把 ROUTERCTL_MCP_TOKEN 的值作为 Bearer 令牌发送。"],
+      };
+    case "opencode":
+      return {
+        agent,
+        transport: "http",
+        format: "json",
+        file: "~/.config/opencode/opencode.json",
+        snippet: json({
+          $schema: "https://opencode.ai/config.json",
+          mcp: {
+            "router-tools": {
+              type: "remote",
+              url,
+              oauth: false,
+              headers: bearer("{env:ROUTERCTL_MCP_TOKEN}"),
+            },
+          },
+        }),
+        notes: [
+          "请直接编辑文件：opencode mcp add 不能关闭 OAuth。",
+          "opencode 1.x 和 2.x 都能读取这种写法；1.x 不接受 2.x 文档中的 mcp.servers 写法。",
+        ],
+      };
+    case "pi":
+      return {
+        agent,
+        transport: "http",
+        format: "json",
+        file: "~/.pi/agent/mcp.json",
+        snippet: json({
+          mcpServers: {
+            "router-tools": {
+              type: "http",
+              url,
+              headers: bearer("${ROUTERCTL_MCP_TOKEN}"),
+              exposure: "direct",
+            },
+          },
+        }),
+        command: `pi mcp add router-tools --url ${url} --bearer-token-env-var ROUTERCTL_MCP_TOKEN --exposure direct`,
+        notes: ['"exposure": "direct" 让模型直接看到这些工具；pi 默认的 code mode 会隐藏它们。'],
+      };
+    case "dsh":
+      return {
+        agent,
+        transport: "http",
+        format: "yaml",
+        file: "~/.dsh/cordis.patch.yml",
+        snippet: `- insert:\n    - id: mcp-router-tools\n      name: '@deepseek-ai/dsh-mcp-client'\n      config:\n        serverName: router-tools\n        transport: streamable-http\n        url: '${url}'\n        headers:\n          Authorization: !!js '\`Bearer \${process.env.ROUTERCTL_MCP_TOKEN}\`'\n`,
+        notes: [
+          "!!js 表达式在 dsh 加载配置时读取 ROUTERCTL_MCP_TOKEN。",
+          "把这段 insert 合并进已有文件，或单独保存后用 dsh --patch <文件> 启动。",
+        ],
+      };
+    default:
+      return {
+        agent,
+        transport: "http",
+        format: "json",
+        snippet: json({
+          mcpServers: { "router-tools": { type: "http", url, headers: bearer("<token>") } },
+        }),
+        notes: ["把 <token> 换成访问令牌。有些客户端把这种类型叫 streamable-http。"],
+      };
+  }
 }
 
 // Preview-only RD08 profile shaped like device.Profile; the catalog and preview reports share it.
@@ -491,6 +619,92 @@ function previewDeepStatus(
 
 function createMockAPI(): RouterAPI {
   const history: HistoryEntry[] = [];
+  // Preview-only agent access: what the Go listener would report. Scenarios: agent-busy (on, writes on, an
+  // agent run in progress), agent-error (applying fails as if the port were taken), agent-differs (an
+  // installed skill differs until replaced).
+  const agentScenario = () => window.__ROUTER_PREVIEW_SCENARIO__ || "";
+  const busy = agentScenario() === "agent-busy";
+  let agentListener: AgentListenerStatus = {
+    listening: busy,
+    enabled: busy,
+    listen_host: busy ? "0.0.0.0" : "127.0.0.1",
+    port: 18731,
+    allow_writes: busy,
+    token_set: busy,
+    token_created_at: busy ? "2026-11-27T08:00:00Z" : undefined,
+    address: busy ? "0.0.0.0:18731" : undefined,
+  };
+  let agentOperations: AgentOperation[] = busy
+    ? [
+        {
+          operation_id: "agent-preview-1",
+          tool: "guide_apply",
+          host: "192.168.31.1",
+          status: "running",
+          done: false,
+          started: new Date().toISOString(),
+        },
+        {
+          operation_id: "agent-preview-0",
+          tool: "backup_create",
+          host: "192.168.31.1",
+          status: "succeeded",
+          done: true,
+          started: new Date(Date.now() - 600000).toISOString(),
+          ended: new Date(Date.now() - 420000).toISOString(),
+        },
+      ]
+    : [];
+  let agentActivity: AgentActivity[] = busy
+    ? [
+        {
+          time: new Date().toISOString(),
+          kind: "call",
+          tool: "guide_apply",
+          operation_id: "agent-preview-1",
+          host: "192.168.31.1",
+          status: "running",
+          duration_ms: 20000,
+          done: false,
+        },
+        {
+          time: new Date(Date.now() - 420000).toISOString(),
+          kind: "finish",
+          tool: "backup_create",
+          operation_id: "agent-preview-0",
+          host: "192.168.31.1",
+          status: "succeeded",
+          duration_ms: 180000,
+          done: true,
+        },
+        {
+          time: new Date(Date.now() - 600000).toISOString(),
+          kind: "call",
+          tool: "guide_plan",
+          host: "192.168.31.1",
+          status: "succeeded",
+          duration_ms: 3200,
+          done: true,
+        },
+      ]
+    : [];
+  let skillInstalled = agentScenario() === "agent-differs" ? "differs" : "";
+  const agentListeners = new Set<(status: AgentStatus) => void>();
+  const agentURL = () => {
+    const host = agentListener.listen_host === "0.0.0.0" ? "127.0.0.1" : agentListener.listen_host;
+    return `http://${host.includes(":") ? `[${host}]` : host}:${agentListener.port}/mcp`;
+  };
+  const agentStatus = (): AgentStatus => ({
+    listener: { ...agentListener },
+    url: agentURL(),
+    local_addresses: ["192.168.31.20"],
+    operations: agentOperations.map((operation) => ({ ...operation })),
+    activity: agentActivity.map((record) => ({ ...record })),
+    agents: previewAgents,
+    skill_paths: previewSkillPaths,
+  });
+  const publishAgents = () => agentListeners.forEach((listener) => listener(agentStatus()));
+  const previewToken = () => `rtmcp_preview${Math.random().toString(36).slice(2, 12)}`;
   // Preview-only vault: metadata of "saved" passwords, never a value.
   let vault: CredentialEntry[] = [];
   const credentialReport = (operation: string, entries: CredentialEntry[]): CredentialReport => ({
@@ -742,6 +956,103 @@ function createMockAPI(): RouterAPI {
       hostKeyListener = callback;
       return () => {
         hostKeyListener = undefined;
+      };
+    },
+    // Preview prompts never expire.
+    OnHostKeyExpired: () => () => {},
+    AgentStatus: async () => agentStatus(),
+    AgentApply: async (change) => {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      if (agentScenario() === "agent-error") {
+        // Like Go: the status keeps the error as last_error and the call rejects with the same text.
+        const failure = `端口已被其他程序占用：换一个端口，或先关闭占用它的程序（listen tcp4 ${change.listen_host}:${change.port}: bind: address already in use）`;
+        agentListener = { ...agentListener, last_error: failure };
+        publishAgents();
+        throw new Error(failure);
+      }
+      let token: string | undefined;
+      if (change.enabled && !agentListener.token_set) token = previewToken();
+      agentListener = {
+        ...change,
+        listening: change.enabled,
+        address: change.enabled ? `${change.listen_host}:${change.port}` : undefined,
+        token_set: agentListener.token_set || Boolean(token),
+        token_created_at: token ? new Date().toISOString() : agentListener.token_created_at,
+      };
+      publishAgents();
+      return { status: { ...agentListener }, token };
+    },
+    AgentNewToken: async () => {
+      agentListener = {
+        ...agentListener,
+        token_set: true,
+        token_created_at: new Date().toISOString(),
+      };
+      publishAgents();
+      return previewToken();
+    },
+    AgentSetup: async (agent) => {
+      if (agent === "workbuddy") throw new Error("WorkBuddy documents only stdio MCP servers");
+      return previewSetup(agent, agentURL());
+    },
+    AgentInstallSkill: async (request) => {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const path = request.dir
+        ? `${request.dir}/router-tools`
+        : (previewSkillPaths[request.agent ?? ""] ?? "~/.agents/skills/router-tools");
+      if (skillInstalled === "differs" && !request.force) {
+        return {
+          status: "differs",
+          path,
+          message: `${path} differs from the skill this routerctl ships (SKILL.md)`,
+        };
+      }
+      const status =
+        skillInstalled === ""
+          ? "installed"
+          : skillInstalled === "differs"
+            ? "updated"
+            : "unchanged";
+      skillInstalled = "installed";
+      return { status, path, files: ["SKILL.md"] };
+    },
+    AgentCancel: async (id) => {
+      const operation = agentOperations.find(
+        (candidate) => candidate.operation_id === id && !candidate.done,
+      );
+      if (!operation) return false;
+      agentOperations = agentOperations.map((candidate) =>
+        candidate === operation
+          ? {
+              ...candidate,
+              done: true,
+              status: "failed",
+              error_code: "CANCELED",
+              ended: new Date().toISOString(),
+            }
+          : candidate,
+      );
+      agentActivity = [
+        {
+          time: new Date().toISOString(),
+          kind: "finish",
+          tool: operation.tool,
+          operation_id: id,
+          host: operation.host,
+          status: "failed",
+          error_code: "CANCELED",
+          duration_ms: 1000,
+          done: true,
+        },
+        ...agentActivity,
+      ];
+      publishAgents();
+      return true;
+    },
+    OnAgentStatus: (callback) => {
+      agentListeners.add(callback);
+      return () => {
+        agentListeners.delete(callback);
       };
     },
   };

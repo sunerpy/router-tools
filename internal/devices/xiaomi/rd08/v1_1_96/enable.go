@@ -71,7 +71,10 @@ func (p *Prober) EnableSSH(ctx context.Context, target device.Target, adminPassw
 		if errors.As(verifyErr, &deviceErr) && (deviceErr.Code == device.CodeHostKeyMismatch || deviceErr.Code == device.CodeSSHHostKeyRejected) {
 			return result, verifyErr
 		}
-		result.Warnings = append(result.Warnings, "existing SSH did not accept the new root credentials; continuing with the fixed enable flow")
+		// A canceled pre-check checked nothing; the check before the first write below stops the run.
+		if ctx.Err() == nil {
+			result.Warnings = append(result.Warnings, "existing SSH did not accept the new root credentials; continuing with the fixed enable flow")
+		}
 	}
 
 	macs, err := p.macGenerator()
@@ -87,6 +90,12 @@ func (p *Prober) EnableSSH(ctx context.Context, target device.Target, adminPassw
 	}
 	var primaryErr error
 	for index, command := range commands {
+		// Spec §16.5: a run canceled before a new write is sent stops without sending it, also when the
+		// cancellation ended the pre-check above (a host-key decision, for example).
+		if err := ctx.Err(); err != nil {
+			primaryErr = device.WrapError(device.CodeCanceled, "operation canceled", err)
+			break
+		}
 		mac := macs[index]
 		result.AttemptedMACs = append(result.AttemptedMACs, mac)
 		if err := session.AddMACRule(ctx, mac, command); err != nil {
@@ -99,12 +108,14 @@ func (p *Prober) EnableSSH(ctx context.Context, target device.Target, adminPassw
 		p.sleep(2 * time.Second)
 	}
 
+	// Spec §16.5: cleanup is still attempted after a cancellation; each request keeps its own short timeout.
+	cleanupCtx := context.WithoutCancel(ctx)
 	cleanupFailed := false
 	for _, mac := range result.AttemptedMACs {
 		cleanup := app.CleanupResult{MAC: mac}
 		for attempt := 1; attempt <= 2; attempt++ {
 			cleanup.Attempts = attempt
-			err := session.DeleteMACRule(ctx, mac)
+			err := session.DeleteMACRule(cleanupCtx, mac)
 			if err == nil {
 				cleanup.Success = true
 				cleanup.Error = ""
@@ -136,6 +147,12 @@ func (p *Prober) EnableSSH(ctx context.Context, target device.Target, adminPassw
 
 	var verifyErr error
 	for attempt := 0; attempt < 3; attempt++ {
+		// Spec §16.5: after a cancellation the following steps stop; the commands were sent, so the run stays
+		// partial below.
+		if err := ctx.Err(); err != nil {
+			verifyErr = device.WrapError(device.CodeCanceled, "operation canceled", err)
+			break
+		}
 		verification, err := p.verifySSH(ctx, target, rootPassword, policy)
 		if err == nil && verification.RootVerified {
 			result.SSHVerified = true

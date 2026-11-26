@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"golang.org/x/crypto/ssh"
@@ -102,6 +103,40 @@ func TestPolicyInteractiveConfirmation(t *testing.T) {
 	}
 	if prompt.Fingerprint != ssh.FingerprintSHA256(key) || prompt.Algorithm != key.Type() {
 		t.Fatalf("prompt = %+v", prompt)
+	}
+}
+
+// Every key exchange on a connection calls the callback again: a key accepted earlier in it is trusted without a
+// second question or a second known_hosts line, and a different key in its place is a changed key.
+func TestPolicyRemembersAKeyAcceptedOnTheConnection(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	key := testPublicKey(t)
+	asked := 0
+	callback, err := (hostkey.Policy{KnownHostsPath: path, Confirm: func(hostkey.Prompt) bool {
+		asked++
+		return true
+	}}).Callback(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := &net.TCPAddr{IP: net.ParseIP("192.168.31.1"), Port: 22}
+	for range 2 {
+		if err := callback("192.168.31.1:22", remote, key); err != nil {
+			t.Fatal(err)
+		}
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asked != 1 || strings.Count(string(content), "\n") != 1 {
+		t.Fatalf("asked %d times, known_hosts:\n%s", asked, content)
+	}
+	assertCode(t, callback("192.168.31.1:22", remote, testPublicKey(t)), device.CodeHostKeyMismatch)
+	if asked != 1 {
+		t.Fatalf("a changed key was asked about: %d", asked)
 	}
 }
 

@@ -29,6 +29,10 @@ The record keeps the adapter's evidence (`write_evidence`): whether a write star
 
 Without a run directory, `deep-persist` keeps its journal in the router's managed directory, so any later attempt finds it. The desktop deep flow always uses the managed directory too. Journals written to a custom `--run-dir`, and by desktop builds from before the 向导 page (which wrote to the directory you chose), are found only in that directory. Before another deep attempt, check every earlier run directory for a journal of the router.
 
+## Runs started by an agent
+
+Agent runs (through `routerctl mcp` or the desktop's 「Agent 接入」) leave the same recovery records as your own runs and are blocked by them in the same way. Agents cannot acknowledge a record: check the router yourself, then run `routerctl --host <address> recovery ack` or use 我已检查路由器 in the desktop app. In the desktop's 运行报告, such runs carry an Agent badge.
+
 ## If a guided run stopped
 
 `setup` runs its steps through the same commands and stops at the first step that did not succeed. Steps after it are `not_run` and were not attempted. Read the failing step's own report (enable, backup, soft or reboot) and handle it as that command's failure. Never repeat the run only because it stopped: detect again with `setup --plan-only`, which shows what is still missing, and acknowledge first if the stopped step blocks further changes.

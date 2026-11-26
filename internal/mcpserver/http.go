@@ -86,6 +86,13 @@ func (v *TokenVerifier) SetHash(hash [32]byte) {
 	v.hash, v.set = hash, true
 }
 
+// Clear refuses every token until a token or hash is set again.
+func (v *TokenVerifier) Clear() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.hash, v.set = [32]byte{}, false
+}
+
 // Verify compares in constant time.
 func (v *TokenVerifier) Verify(presented string) bool {
 	v.mu.RLock()

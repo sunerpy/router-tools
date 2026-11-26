@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, inject, provide, ref } from "vue";
+import { computed, inject, onMounted, onUnmounted, provide, ref } from "vue";
 import { useRoute } from "vue-router";
 import { NConfigProvider, darkTheme } from "naive-ui";
 import {
+  Bot,
   FileClock,
   Fingerprint,
   Moon,
@@ -14,11 +15,13 @@ import {
   Sun,
   Wrench,
 } from "lucide-vue-next";
+import { useAgents } from "./composables/useAgents";
 import { useGuide } from "./composables/useGuide";
 import { useOperations } from "./composables/useOperations";
 import type { ThemeController } from "./composables/useTheme";
 import { createAPI, isPreview } from "./services/wails";
-import { guideStatus, latestEntry, targetStatus } from "./services/summary";
+import { agentHeaderStatus, agentNavState } from "./services/agents";
+import { guideStatus, latestOwnEntry, targetStatus } from "./services/summary";
 import type { CatalogEntry } from "./services/api";
 import { documentTokens, naiveOverrides } from "./styles/naiveTheme";
 import HostKeyDialog from "./components/HostKeyDialog.vue";
@@ -28,6 +31,14 @@ const theme = inject("theme") as ThemeController;
 const api = createAPI();
 const store = useOperations(api);
 const guide = useGuide(api, store);
+// Agent access is shared by its page and the sidebar's state word; Go pushes changes as agent:status.
+const agents = useAgents(api);
+let stopAgents = () => {};
+onMounted(() => {
+  stopAgents = agents.subscribe();
+  void agents.load();
+});
+onUnmounted(() => stopAgents());
 const catalog = ref<CatalogEntry[]>([]);
 api
   .Catalog()
@@ -36,12 +47,16 @@ api
 provide("api", api);
 provide("operations", store);
 provide("guide", guide);
+provide("agents", agents);
 provide("catalog", catalog);
 const showPrimitives = import.meta.env.DEV;
-// The guide keeps its own run state; the other pages share the operations store.
-const headerStatus = computed(() =>
-  route.name === "guide" ? guideStatus(guide.phase, guide.run, guide.error) : store.status,
-);
+// The guide keeps its own run state and 「Agent 接入」 shows the agent operations; the other pages share the
+// operations store.
+const headerStatus = computed(() => {
+  if (route.name === "guide") return guideStatus(guide.phase, guide.run, guide.error);
+  if (route.name === "agents") return agentHeaderStatus(agents.status);
+  return store.status;
+});
 const route = useRoute();
 
 const naiveTheme = computed(() => (theme.resolved.value === "dark" ? darkTheme : null));
@@ -63,6 +78,10 @@ const navigation = computed(() => [
   },
   { label: "高风险", items: [{ to: "/deep", label: "深度固化", icon: ShieldAlert, risk: true }] },
   {
+    label: "集成",
+    items: [{ to: "/agents", label: "Agent 接入", icon: Bot, state: agentNavState(agents.status) }],
+  },
+  {
     label: "记录",
     items: [
       { to: "/reports", label: "运行报告", icon: FileClock, count: store.history.length },
@@ -71,12 +90,13 @@ const navigation = computed(() => [
   },
 ]);
 
-// The sidebar summarizes the latest detection: the guide's plan, or a preflight from 维护.
+// The sidebar summarizes the window's latest detection: the guide's plan, or a preflight from 维护. An agent's
+// preflight of another router must not read as a changed target.
 const latestDetection = computed(() => {
   if (guide.plan) return guide.plan;
   return store.operation === "Doctor" && store.report
     ? store.report
-    : (latestEntry(store.history, "doctor")?.report as any);
+    : (latestOwnEntry(store.history, "doctor")?.report as any);
 });
 const target = computed(() => targetStatus(latestDetection.value, store.target.host));
 const hostKeyLabel = computed(() => {
@@ -109,6 +129,9 @@ const hostKeyLabel = computed(() => {
               <span>{{ item.label }}</span>
               <span v-if="(item as any).count" class="app-nav__count mono">{{
                 (item as any).count
+              }}</span>
+              <span v-if="(item as any).state" class="app-nav__count">{{
+                (item as any).state
               }}</span>
             </RouterLink>
           </section>

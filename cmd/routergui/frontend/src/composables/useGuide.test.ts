@@ -97,6 +97,7 @@ function makeAPI(plan: GuidePlanReport = freshPlan()) {
       return () => {};
     }),
     OnHostKey: vi.fn().mockReturnValue(() => {}),
+    OnHostKeyExpired: vi.fn().mockReturnValue(() => {}),
   } as unknown as RouterAPI;
   return { api, emit: (payload: ProgressPayload) => progress?.(payload) };
 }

@@ -2,6 +2,7 @@ package sshtransport_test
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
@@ -26,6 +27,9 @@ type fixture struct {
 	stderr []byte
 	exit   uint32
 	delay  time.Duration
+	// pause, then: after stdout the command waits pause and writes then.
+	pause time.Duration
+	then  []byte
 }
 
 type sshServer struct {
@@ -136,6 +140,100 @@ func TestSSHTimeoutClosesConnection(t *testing.T) {
 	}
 }
 
+// A person deciding about an unknown key may take longer than the handshake deadline: the desktop waits up to
+// two minutes and the CLI asks on the terminal.
+func TestSSHWaitsForAHostKeyDecision(t *testing.T) {
+	t.Parallel()
+
+	server := startSSHServer(t, "password", nil)
+	password, _ := secret.NewPassword("password")
+	client, err := sshtransport.Dial(t.Context(), sshtransport.WithTimeout(sshtransport.Config{
+		Host: server.host(), Port: server.port(), Password: password,
+		HostKeyCallback: func(string, net.Addr, ssh.PublicKey) error {
+			time.Sleep(600 * time.Millisecond) // the user compares the fingerprint
+			return nil
+		},
+	}, 200*time.Millisecond))
+	if err != nil {
+		t.Fatalf("Dial() after a slow decision: %v", err)
+	}
+	_ = client.Close()
+}
+
+// The deadline starts again once the key is decided, so a server that stalls afterwards is not waited for.
+func TestSSHDeadlineResumesAfterTheHostKeyDecision(t *testing.T) {
+	t.Parallel()
+
+	server := startSSHServerWithAuthDelay(t, "password", nil, 3*time.Second)
+	password, _ := secret.NewPassword("password")
+	started := time.Now()
+	_, err := sshtransport.Dial(t.Context(), sshtransport.WithTimeout(sshtransport.Config{
+		Host: server.host(), Port: server.port(), Password: password,
+		HostKeyCallback: func(string, net.Addr, ssh.PublicKey) error { return nil },
+	}, 200*time.Millisecond))
+	assertDeviceCode(t, err, device.CodeSSHUnreachable)
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("waited %s for a stalled server", elapsed)
+	}
+}
+
+// Later key exchanges call the host-key callback again; they must leave a command's own deadline alone.
+func TestSSHRekeyKeepsTheCommandDeadline(t *testing.T) {
+	t.Parallel()
+
+	server := startSSHServerWith(t, "password", map[string]fixture{
+		"stream": {stdout: bytes.Repeat([]byte("x"), 64<<10), pause: 600 * time.Millisecond, then: []byte("done")},
+	}, 0, 4<<10)
+	password, _ := secret.NewPassword("password")
+	var keyChecks int32
+	var mu sync.Mutex
+	client, err := sshtransport.Dial(t.Context(), sshtransport.WithTimeout(sshtransport.Config{
+		Host: server.host(), Port: server.port(), Password: password,
+		HostKeyCallback: func(string, net.Addr, ssh.PublicKey) error {
+			mu.Lock()
+			keyChecks++
+			mu.Unlock()
+			return nil
+		},
+	}, 200*time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = client.Close() }()
+	result, err := client.Run(t.Context(), "stream", shell.RunOptions{Timeout: 5 * time.Second})
+	if err != nil || !bytes.HasSuffix(result.Stdout, []byte("done")) {
+		t.Fatalf("Run(stream) = %d bytes, %v", len(result.Stdout), err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if keyChecks < 2 {
+		t.Fatalf("the server did not rekey (%d key checks); the test proves nothing", keyChecks)
+	}
+}
+
+// Canceling the operation while the user decides reports the cancellation, not a rejected key.
+func TestSSHCanceledDuringAHostKeyDecision(t *testing.T) {
+	t.Parallel()
+
+	server := startSSHServer(t, "password", nil)
+	password, _ := secret.NewPassword("password")
+	ctx, cancel := context.WithCancel(t.Context())
+	asked := make(chan struct{})
+	go func() {
+		<-asked
+		cancel()
+	}()
+	_, err := sshtransport.Dial(ctx, sshtransport.Config{
+		Host: server.host(), Port: server.port(), Password: password,
+		HostKeyCallback: func(string, net.Addr, ssh.PublicKey) error {
+			close(asked)
+			<-ctx.Done() // the desktop's dialog ends with the operation
+			return &device.Error{Code: device.CodeSSHHostKeyRejected, Message: "unknown SSH host key was not accepted"}
+		},
+	})
+	assertDeviceCode(t, err, device.CodeCanceled)
+}
+
 func TestSSHRequiresHostKeyCallbackBeforeNetworkAccess(t *testing.T) {
 	t.Parallel()
 
@@ -148,6 +246,18 @@ func TestSSHRequiresHostKeyCallbackBeforeNetworkAccess(t *testing.T) {
 
 func startSSHServer(t *testing.T, password string, fixtures map[string]fixture) *sshServer {
 	t.Helper()
+	return startSSHServerWith(t, password, fixtures, 0, 0)
+}
+
+// startSSHServerWithAuthDelay answers password authentication only after delay.
+func startSSHServerWithAuthDelay(t *testing.T, password string, fixtures map[string]fixture, delay time.Duration) *sshServer {
+	t.Helper()
+	return startSSHServerWith(t, password, fixtures, delay, 0)
+}
+
+// startSSHServerWith also sets the server's rekey threshold in bytes (zero keeps the default).
+func startSSHServerWith(t *testing.T, password string, fixtures map[string]fixture, delay time.Duration, rekeyThreshold uint64) *sshServer {
+	t.Helper()
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -157,11 +267,13 @@ func startSSHServer(t *testing.T, password string, fixtures map[string]fixture) 
 		t.Fatal(err)
 	}
 	config := &ssh.ServerConfig{PasswordCallback: func(metadata ssh.ConnMetadata, given []byte) (*ssh.Permissions, error) {
+		time.Sleep(delay)
 		if metadata.User() == "root" && string(given) == password {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("authentication failed")
 	}}
+	config.RekeyThreshold = rekeyThreshold
 	config.AddHostKey(signer)
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -219,6 +331,10 @@ func (s *sshServer) handle(connection net.Conn) {
 					time.Sleep(fixture.delay)
 				}
 				writeChunks(channel, fixture.stdout)
+				if fixture.pause > 0 {
+					time.Sleep(fixture.pause)
+				}
+				writeChunks(channel, fixture.then)
 				writeChunks(channel.Stderr(), fixture.stderr)
 				_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{fixture.exit}))
 				return

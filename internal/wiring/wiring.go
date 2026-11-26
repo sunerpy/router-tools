@@ -23,6 +23,7 @@ type Paths struct {
 	DeepJournal string // <UserConfigDir>/routerctl/deep: managed deep journals
 	Backups     string // <UserHomeDir>/RouterTools/backups: managed partition backups (not roaming)
 	Credentials string // <UserConfigDir>/routerctl/credentials: the encrypted password vault
+	MCP         string // <UserConfigDir>/routerctl/mcp: the desktop's agent access settings
 }
 
 // DefaultPaths resolves the managed directories for the current user. It fails instead of falling back to
@@ -43,6 +44,7 @@ func DefaultPaths() (Paths, error) {
 		DeepJournal: filepath.Join(base, "deep"),
 		Backups:     filepath.Join(home, "RouterTools", "backups"),
 		Credentials: filepath.Join(base, "credentials"),
+		MCP:         filepath.Join(base, "mcp"),
 	}, nil
 }
 

@@ -11,6 +11,9 @@ import type {
 const defaultTarget: Target = { host: "192.168.31.1", web_port: 80, ssh_port: 22, telnet_port: 23 };
 const preferenceKey = "router.preferences";
 
+/** Pause between two host-key dialogs, so a double click on one cannot answer the next. */
+export const HOST_KEY_GAP_MS = 400;
+
 function loadPreferences() {
   try {
     const saved = JSON.parse(localStorage.getItem(preferenceKey) || "{}");
@@ -69,6 +72,9 @@ export function useOperations(api: RouterAPI) {
   // The target each run was sent to, so summaries never label old evidence with an edited form.
   const targets = new Map<string, Target>();
   const hostKeyPrompt = ref<HostKeyPrompt | null>(null);
+  const hostKeyQueue = ref<HostKeyPrompt[]>([]);
+  let hostKeyTimer: ReturnType<typeof setTimeout> | undefined;
+  const hostKeyWaiting = computed(() => hostKeyQueue.value.length);
   const busy = computed(() => status.value === "running" || status.value === "canceling");
 
   watch(
@@ -91,8 +97,29 @@ export function useOperations(api: RouterAPI) {
     events.value.push({ stage: payload.event.stage, status: payload.event.status });
     status.value = payload.event.status;
   });
+  // Agent operations and the window's own can wait for host keys at the same time: prompts queue, one dialog
+  // shows at a time, and a new prompt never replaces the one the user is reading.
+  function showNextHostKey() {
+    hostKeyTimer = undefined;
+    if (!hostKeyPrompt.value) hostKeyPrompt.value = hostKeyQueue.value.shift() ?? null;
+  }
+  // The pause follows every answered or withdrawn prompt, queued or not: a prompt that arrives during it waits,
+  // so the second click of a double click lands on nothing.
+  function pauseBeforeNextHostKey() {
+    if (hostKeyTimer === undefined) hostKeyTimer = setTimeout(showNextHostKey, HOST_KEY_GAP_MS);
+  }
   api.OnHostKey((prompt) => {
-    hostKeyPrompt.value = prompt;
+    if (!hostKeyPrompt.value && hostKeyTimer === undefined) hostKeyPrompt.value = prompt;
+    else hostKeyQueue.value.push(prompt);
+  });
+  // Go stops waiting after two minutes, or when the operation is canceled or ends, and refuses the key; answering
+  // such a prompt would change nothing.
+  api.OnHostKeyExpired((promptID) => {
+    hostKeyQueue.value = hostKeyQueue.value.filter((prompt) => prompt.prompt_id !== promptID);
+    if (hostKeyPrompt.value?.prompt_id === promptID) {
+      hostKeyPrompt.value = null;
+      pauseBeforeNextHostKey();
+    }
   });
 
   function clearSecrets() {
@@ -198,9 +225,11 @@ export function useOperations(api: RouterAPI) {
   }
 
   async function resolveHostKey(accept: boolean) {
-    if (!hostKeyPrompt.value) return;
-    api.ResolveHostKey(hostKeyPrompt.value.prompt_id, accept);
+    const prompt = hostKeyPrompt.value;
+    if (!prompt) return;
+    api.ResolveHostKey(prompt.prompt_id, accept);
     hostKeyPrompt.value = null;
+    pauseBeforeNextHostKey();
   }
 
   return reactive({
@@ -226,6 +255,7 @@ export function useOperations(api: RouterAPI) {
     error,
     history,
     hostKeyPrompt,
+    hostKeyWaiting,
     busy,
     run,
     cancel,

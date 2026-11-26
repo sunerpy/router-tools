@@ -27,6 +27,14 @@ export function latestEntry(history: HistoryEntry[], operation: string): History
   return history.find((item) => item.operation === operation);
 }
 
+/** The newest entry of an operation the window started itself; agent runs are shown on their own page. */
+export function latestOwnEntry(
+  history: HistoryEntry[],
+  operation: string,
+): HistoryEntry | undefined {
+  return history.find((item) => item.operation === operation && item.source !== "agent");
+}
+
 /** A failed run whose error is CANCELED is shown as canceled; partial and unknown keep their status. */
 export function displayStatus(report: any): string {
   const status = report?.status || "unknown";
@@ -48,6 +56,8 @@ export interface OperationRow {
   meta: string;
   status: string;
   code?: string;
+  /** An agent started the operation. */
+  agent?: boolean;
 }
 
 function pad(value: number): string {
@@ -84,6 +94,7 @@ export function recentOperations(
       meta,
       status: displayStatus(report),
       code,
+      agent: item.source === "agent",
     };
   });
 }

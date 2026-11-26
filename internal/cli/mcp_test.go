@@ -224,7 +224,10 @@ func TestMCPStdioKeepsStdoutForProtocolMessages(t *testing.T) {
 			t.Fatalf("routerctl mcp exited early with %d: %q", code, stderr.String())
 		case <-time.After(50 * time.Millisecond):
 		}
-		waitForText(t, stdout, regexp.MustCompile(`"id":3`))
+		// The SDK answers calls concurrently, so tools/call (3) may finish before tools/list (2); closing stdin
+		// ends the session, and a call still running then has no response. Wait for both.
+		waitForText(t, stdout, regexp.MustCompile(`"id":2[,}]`))
+		waitForText(t, stdout, regexp.MustCompile(`"id":3[,}]`))
 		_ = stdinWriter.Close()
 		select {
 		case code := <-codes:

@@ -3,6 +3,11 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net"
+	"net/netip"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -196,5 +201,75 @@ func TestFinishedOperationsReleaseTheirPasswords(t *testing.T) {
 	data, _ := json.Marshal(result.report)
 	if strings.Contains(string(data), "pw-123456") || strings.Contains(result.err.Message, "pw-123456") {
 		t.Fatalf("finished result keeps the password: %s / %s", data, result.err.Message)
+	}
+}
+
+type internalStore struct{ settings Settings }
+
+func (s *internalStore) Load() (Settings, error) { return s.settings, nil }
+
+func (s *internalStore) Save(settings Settings) error {
+	s.settings = settings
+	return nil
+}
+
+// When a specific address and the wildcard swap on one port, the old listener is closed to free the port; if
+// the new bind still fails, the old address is bound and served again.
+func TestListenerRestoresThePreviousListenerWhenTheRetryFails(t *testing.T) {
+	t.Parallel()
+	probe, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := probe.Addr().(*net.TCPAddr).Port
+	_ = probe.Close()
+	wildcard := net.JoinHostPort("0.0.0.0", strconv.Itoa(port))
+	attempts := 0
+	store := &internalStore{settings: DefaultSettings()}
+	listener := NewListener(New(nil, NewOperations(), Options{}), ListenerOptions{
+		Store: store,
+		Local: func() ([]netip.Addr, error) { return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil },
+		listen: func(address string) (net.Listener, error) {
+			if address == wildcard {
+				attempts++
+				return nil, &net.OpError{Op: "listen", Net: "tcp4", Err: os.NewSyscallError("bind", errAddressInUse)}
+			}
+			return listen(address)
+		},
+	})
+	t.Cleanup(listener.Close)
+	listener.Start()
+	if _, err := listener.Apply(SettingsChange{Enabled: true, ListenHost: "127.0.0.1", Port: port}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := listener.Apply(SettingsChange{Enabled: true, ListenHost: "0.0.0.0", Port: port}); !AddressInUse(err) {
+		t.Fatalf("err = %v", err)
+	}
+	if attempts != 2 {
+		t.Fatalf("bind attempts = %d, want the first and one retry", attempts)
+	}
+	status := listener.Status()
+	if !status.Listening || status.Address != net.JoinHostPort("127.0.0.1", strconv.Itoa(port)) || store.settings.ListenHost != "127.0.0.1" {
+		t.Fatalf("status = %+v, stored = %+v", status, store.settings)
+	}
+	connection, err := net.DialTimeout("tcp4", status.Address, time.Second)
+	if err != nil {
+		t.Fatalf("the previous address is not served again: %v", err)
+	}
+	_ = connection.Close()
+}
+
+// After the rename the new file is what Load reads, so a directory that cannot be synced (some FUSE and SMB
+// mounts refuse it) must not report the save as failed: Apply would roll back while the file changed.
+func TestSettingsSaveSucceedsWhenTheDirectoryCannotBeSynced(t *testing.T) {
+	t.Parallel()
+	store := SettingsStore{Dir: t.TempDir(), syncDir: func(string) error { return errors.New("sync not supported") }}
+	settings := DefaultSettings()
+	settings.Enabled, settings.AllowWrites = true, true
+	if err := store.Save(settings); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if loaded, err := store.Load(); err != nil || loaded != settings {
+		t.Fatalf("load = %+v, %v", loaded, err)
 	}
 }

@@ -54,3 +54,54 @@ func (a *jsonAudit) Record(record AuditRecord) {
 type discardAudit struct{}
 
 func (discardAudit) Record(AuditRecord) {}
+
+// AuditFunc adapts a function to an AuditSink.
+type AuditFunc func(AuditRecord)
+
+// Record calls the function.
+func (f AuditFunc) Record(record AuditRecord) { f(record) }
+
+type multiAudit []AuditSink
+
+// MultiAudit sends every record to each sink in order.
+func MultiAudit(sinks ...AuditSink) AuditSink { return multiAudit(sinks) }
+
+func (m multiAudit) Record(record AuditRecord) {
+	for _, sink := range m {
+		sink.Record(record)
+	}
+}
+
+// AuditRing keeps the newest records in memory, for the desktop's activity list.
+type AuditRing struct {
+	mu       sync.Mutex
+	records  []AuditRecord
+	capacity int
+}
+
+// NewAuditRing keeps at most capacity records.
+func NewAuditRing(capacity int) *AuditRing {
+	return &AuditRing{capacity: capacity}
+}
+
+// Record keeps the record, dropping the oldest beyond the capacity.
+func (r *AuditRing) Record(record AuditRecord) {
+	record.Audit = "mcp"
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.records = append(r.records, record)
+	if len(r.records) > r.capacity {
+		r.records = append([]AuditRecord(nil), r.records[len(r.records)-r.capacity:]...)
+	}
+}
+
+// Records returns a copy, newest first.
+func (r *AuditRing) Records() []AuditRecord {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	copied := make([]AuditRecord, len(r.records))
+	for i, record := range r.records {
+		copied[len(r.records)-1-i] = record
+	}
+	return copied
+}

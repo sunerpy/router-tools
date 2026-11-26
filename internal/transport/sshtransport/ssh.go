@@ -9,6 +9,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/crypto/ssh"
@@ -26,6 +27,8 @@ type Config struct {
 	Port            int
 	Password        secret.Password
 	HostKeyCallback ssh.HostKeyCallback
+	// timeout bounds the TCP connection and the handshake; zero means connectionTimeout. Tests shorten it.
+	timeout time.Duration
 }
 
 // Shell executes each command in an independent SSH session.
@@ -47,22 +50,41 @@ func Dial(ctx context.Context, config Config) (*Shell, error) {
 	if config.Host == "" || config.Port < 1 || config.Port > 65535 {
 		return nil, &device.Error{Code: device.CodeInvalidArgument, Message: "invalid SSH target"}
 	}
+	timeout := config.timeout
+	if timeout <= 0 {
+		timeout = connectionTimeout
+	}
 	address := net.JoinHostPort(config.Host, fmt.Sprintf("%d", config.Port))
-	connection, err := (&net.Dialer{Timeout: connectionTimeout}).DialContext(ctx, "tcp", address)
+	connection, err := (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp", address)
 	if err != nil {
 		return nil, sshNetworkError(err)
 	}
-	_ = connection.SetDeadline(time.Now().Add(connectionTimeout))
+	_ = connection.SetDeadline(time.Now().Add(timeout))
+	decide := config.HostKeyCallback
+	var handshaking atomic.Bool
+	handshaking.Store(true)
 	clientConfig := &ssh.ClientConfig{
-		User:            "root",
-		Auth:            []ssh.AuthMethod{ssh.Password(config.Password.Expose())},
-		HostKeyCallback: config.HostKeyCallback,
-		Timeout:         connectionTimeout,
+		User: "root",
+		Auth: []ssh.AuthMethod{ssh.Password(config.Password.Expose())},
+		// A person may be deciding about an unknown key (the desktop waits up to two minutes, the CLI asks on the
+		// terminal), so the handshake deadline stops while the callback runs and starts again when it returns.
+		// Later key exchanges call the callback too; they keep the deadline of the command that is running.
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			if !handshaking.Load() {
+				return decide(hostname, remote, key)
+			}
+			_ = connection.SetDeadline(time.Time{})
+			defer func() { _ = connection.SetDeadline(time.Now().Add(timeout)) }()
+			return decide(hostname, remote, key)
+		},
+		Timeout: timeout,
 	}
 	clientConnection, channels, requests, err := ssh.NewClientConn(connection, address, clientConfig)
+	handshaking.Store(false)
 	if err != nil {
 		_ = connection.Close()
-		if errors.Is(err, context.Canceled) {
+		// A decision ended by the operation's cancellation reads as a canceled run, not as a refused key.
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
 			return nil, device.WrapError(device.CodeCanceled, "operation canceled", err)
 		}
 		var deviceErr *device.Error

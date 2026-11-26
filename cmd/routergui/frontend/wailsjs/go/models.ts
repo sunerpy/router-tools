@@ -1,3 +1,133 @@
+export namespace agentaccess {
+	
+	export class SkillReport {
+	    status: string;
+	    path: string;
+	    files?: string[];
+	    message?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = source["status"];
+	        this.path = source["path"];
+	        this.files = source["files"];
+	        this.message = source["message"];
+	    }
+	}
+	export class SkillRequest {
+	    agent?: string;
+	    dir?: string;
+	    force?: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SkillRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agent = source["agent"];
+	        this.dir = source["dir"];
+	        this.force = source["force"];
+	    }
+	}
+	export class Status {
+	    listener: mcpserver.ListenerStatus;
+	    url: string;
+	    local_addresses: string[];
+	    operations: mcpserver.OperationSummary[];
+	    activity: mcpserver.AuditRecord[];
+	    agents: agentsetup.Agent[];
+	    skill_paths: Record<string, string>;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.listener = this.convertValues(source["listener"], mcpserver.ListenerStatus);
+	        this.url = source["url"];
+	        this.local_addresses = source["local_addresses"];
+	        this.operations = this.convertValues(source["operations"], mcpserver.OperationSummary);
+	        this.activity = this.convertValues(source["activity"], mcpserver.AuditRecord);
+	        this.agents = this.convertValues(source["agents"], agentsetup.Agent);
+	        this.skill_paths = source["skill_paths"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace agentsetup {
+	
+	export class Agent {
+	    id: string;
+	    name: string;
+	    http: boolean;
+	    skill_dir?: string;
+	    docs?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Agent(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.name = source["name"];
+	        this.http = source["http"];
+	        this.skill_dir = source["skill_dir"];
+	        this.docs = source["docs"];
+	    }
+	}
+	export class Setup {
+	    agent: string;
+	    transport: string;
+	    file?: string;
+	    format: string;
+	    snippet: string;
+	    command?: string;
+	    notes?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Setup(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.agent = source["agent"];
+	        this.transport = source["transport"];
+	        this.file = source["file"];
+	        this.format = source["format"];
+	        this.snippet = source["snippet"];
+	        this.command = source["command"];
+	        this.notes = source["notes"];
+	    }
+	}
+
+}
+
 export namespace app {
 	
 	export class CredentialNote {
@@ -364,6 +494,7 @@ export namespace app {
 	    journal_path?: string;
 	    journal_exists: boolean;
 	    backups: ManagedBackup[];
+	    ssh?: string;
 	    root_ssh: string;
 	    inspection?: DeepInspection;
 	    recovery?: state.Outcome;
@@ -388,6 +519,7 @@ export namespace app {
 	        this.journal_path = source["journal_path"];
 	        this.journal_exists = source["journal_exists"];
 	        this.backups = this.convertValues(source["backups"], ManagedBackup);
+	        this.ssh = source["ssh"];
 	        this.root_ssh = source["root_ssh"];
 	        this.inspection = this.convertValues(source["inspection"], DeepInspection);
 	        this.recovery = this.convertValues(source["recovery"], state.Outcome);
@@ -1489,6 +1621,7 @@ export namespace guiapi {
 	    report: any;
 	    // Go type: time
 	    time: any;
+	    source?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new HistoryEntry(source);
@@ -1500,6 +1633,7 @@ export namespace guiapi {
 	        this.operation = source["operation"];
 	        this.report = source["report"];
 	        this.time = this.convertValues(source["time"], null);
+	        this.source = source["source"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1584,6 +1718,204 @@ export namespace guiapi {
 		    }
 		    return a;
 		}
+	}
+
+}
+
+export namespace mcpserver {
+	
+	export class ListenerStatus {
+	    listening: boolean;
+	    address?: string;
+	    enabled: boolean;
+	    listen_host: string;
+	    port: number;
+	    allow_writes: boolean;
+	    token_set: boolean;
+	    // Go type: time
+	    token_created_at: any;
+	    last_error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ListenerStatus(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.listening = source["listening"];
+	        this.address = source["address"];
+	        this.enabled = source["enabled"];
+	        this.listen_host = source["listen_host"];
+	        this.port = source["port"];
+	        this.allow_writes = source["allow_writes"];
+	        this.token_set = source["token_set"];
+	        this.token_created_at = this.convertValues(source["token_created_at"], null);
+	        this.last_error = source["last_error"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ApplyResult {
+	    status: ListenerStatus;
+	    token?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ApplyResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.status = this.convertValues(source["status"], ListenerStatus);
+	        this.token = source["token"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class AuditRecord {
+	    audit: string;
+	    // Go type: time
+	    time: any;
+	    kind: string;
+	    tool: string;
+	    operation_id?: string;
+	    host?: string;
+	    status?: string;
+	    error_code?: string;
+	    duration_ms: number;
+	    done: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new AuditRecord(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.audit = source["audit"];
+	        this.time = this.convertValues(source["time"], null);
+	        this.kind = source["kind"];
+	        this.tool = source["tool"];
+	        this.operation_id = source["operation_id"];
+	        this.host = source["host"];
+	        this.status = source["status"];
+	        this.error_code = source["error_code"];
+	        this.duration_ms = source["duration_ms"];
+	        this.done = source["done"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class OperationSummary {
+	    operation_id: string;
+	    tool: string;
+	    host?: string;
+	    status: string;
+	    done: boolean;
+	    // Go type: time
+	    started: any;
+	    // Go type: time
+	    ended?: any;
+	    error_code?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new OperationSummary(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.operation_id = source["operation_id"];
+	        this.tool = source["tool"];
+	        this.host = source["host"];
+	        this.status = source["status"];
+	        this.done = source["done"];
+	        this.started = this.convertValues(source["started"], null);
+	        this.ended = this.convertValues(source["ended"], null);
+	        this.error_code = source["error_code"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class SettingsChange {
+	    enabled: boolean;
+	    listen_host: string;
+	    port: number;
+	    allow_writes: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new SettingsChange(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.listen_host = source["listen_host"];
+	        this.port = source["port"];
+	        this.allow_writes = source["allow_writes"];
+	    }
 	}
 
 }

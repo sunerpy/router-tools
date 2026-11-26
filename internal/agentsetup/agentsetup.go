@@ -90,6 +90,9 @@ type Request struct {
 	// configuration (CLAUDE_CONFIG_DIR, CODEX_HOME, OPENCODE_CONFIG_DIR, XDG_CONFIG_HOME, PI_CODING_AGENT_DIR,
 	// DSH_HOME) and for HOME. Nil reads nothing.
 	Getenv func(string) string
+	// Lang selects the language of the notes: "" for English (the CLI), "zh" for Simplified Chinese (the
+	// desktop). Snippets and commands do not depend on it.
+	Lang string
 }
 
 // Setup is what a user adds to one host.
@@ -130,22 +133,22 @@ func Build(request Request) (Setup, error) {
 		}
 		setup = httpSetup(agent.ID, endpoint, env)
 		setup.Transport = "http"
-		setup.Notes = append(setup.Notes, "Every request carries Authorization: Bearer <token>; create a token with routerctl mcp token.")
+		setup.Notes = append(setup.Notes, env.say(noteToken))
 	}
 	setup.Agent = agent.ID
 	for _, override := range configOverrides[agent.ID] {
 		if dir := env.getenv(override.variable); dir != "" {
 			setup.File = env.join(dir, override.file...)
-			setup.Notes = append(setup.Notes, override.variable+" is set, so "+agent.Name+" reads "+setup.File+".")
+			setup.Notes = append(setup.Notes, env.say(noteOverride, override.variable, agent.Name, setup.File))
 			break
 		}
 	}
 	if env.quote.unsafe && setup.Command != "" {
 		setup.Command = ""
-		setup.Notes = append(setup.Notes, "No command is printed: the path or URL contains $, ` or %, which PowerShell or cmd.exe would change. Add the snippet to the file instead.")
+		setup.Notes = append(setup.Notes, env.say(noteNoCommand))
 	}
 	if env.windows {
-		setup.Notes = append(setup.Notes, "~ means %USERPROFILE%.")
+		setup.Notes = append(setup.Notes, env.say(noteHome))
 	}
 	return setup, nil
 }
@@ -171,6 +174,8 @@ var configOverrides = map[string][]configOverride{
 // platform is the computer that runs the host.
 type platform struct {
 	windows bool
+	// zh selects the Simplified Chinese notes.
+	zh bool
 	// xdg reports whether routerctl's configuration directory (os.UserConfigDir) follows XDG_CONFIG_HOME there.
 	xdg    bool
 	getenv func(string) string
@@ -188,7 +193,7 @@ func newPlatform(request Request) platform {
 	case "windows", "darwin", "ios", "plan9":
 		xdg = false
 	}
-	return platform{windows: windows, xdg: xdg, getenv: getenv, quote: &quoter{windows: windows}}
+	return platform{windows: windows, zh: request.Lang == "zh", xdg: xdg, getenv: getenv, quote: &quoter{windows: windows}}
 }
 
 // defaultConfigHome reports whether an XDG_CONFIG_HOME value names the directory used without it, $HOME/.config.
@@ -220,14 +225,83 @@ func normalizeURL(raw string) (string, error) {
 	return parsed.String(), nil
 }
 
-// openCodeNotes explains the mcp.<name> form: opencode 2.x still reads it, while opencode 1.x rejects the
-// mcp.servers form that 2.x documents and that its own opencode mcp add writes.
-var openCodeNotes = []string{
-	"opencode 1.x and 2.x both read this form; 1.x rejects the mcp.servers form that 2.x documents.",
-	"Leave timeout unset: a numeric timeout also limits tool calls.",
-}
+// text is a note in English (the CLI) and Simplified Chinese (the desktop). Texts with arguments are
+// fmt formats; the others are used as they are.
+type text struct{ en, zh string }
 
-const writeApprovalNote = "For a prompt before every router write, add permissions.ask rules for mcp__router-tools__guide_apply, mcp__router-tools__soft_remove and mcp__router-tools__operation_cancel."
+var (
+	noteToken = text{
+		"Every request carries Authorization: Bearer <token>; create a token with routerctl mcp token.",
+		"每个请求都带 Authorization: Bearer <令牌>。令牌在「Agent 接入」页的「访问令牌」中生成，命令行用 routerctl mcp token。",
+	}
+	noteOverride  = text{"%s is set, so %s reads %s.", "%s 已设置，所以 %s 读取 %s。"}
+	noteNoCommand = text{
+		"No command is printed: the path or URL contains $, ` or %, which PowerShell or cmd.exe would change. Add the snippet to the file instead.",
+		"没有给出命令：路径或 URL 中含 $、` 或 %，PowerShell 或 cmd.exe 会改写它们。请把片段写入文件。",
+	}
+	noteHome = text{"~ means %USERPROFILE%.", "~ 表示 %USERPROFILE%。"}
+	// noteOpenCodeForm explains the mcp.<name> form: opencode 2.x still reads it, while opencode 1.x rejects
+	// the mcp.servers form that 2.x documents and that its own opencode mcp add writes.
+	noteOpenCodeForm = text{
+		"opencode 1.x and 2.x both read this form; 1.x rejects the mcp.servers form that 2.x documents.",
+		"opencode 1.x 和 2.x 都能读取这种写法；1.x 不接受 2.x 文档中的 mcp.servers 写法。",
+	}
+	noteOpenCodeTimeout = text{
+		"Leave timeout unset: a numeric timeout also limits tool calls.",
+		"不要设置 timeout：数字形式的 timeout 也会限制工具调用。",
+	}
+	noteOpenCodeOAuth = text{"Edit the file: opencode mcp add cannot turn OAuth off.", "请直接编辑文件：opencode mcp add 不能关闭 OAuth。"}
+	noteWriteApproval = text{
+		"For a prompt before every router write, add permissions.ask rules for mcp__router-tools__guide_apply, mcp__router-tools__soft_remove and mcp__router-tools__operation_cancel.",
+		"想在每次写入路由器前得到确认：在 permissions.ask 中加入 mcp__router-tools__guide_apply、mcp__router-tools__soft_remove 和 mcp__router-tools__operation_cancel。",
+	}
+	noteClaudeFile = text{
+		"Run the command, or add the entry under mcpServers in that file (all projects) or in .mcp.json at a project root.",
+		"运行命令，或把条目加到该文件的 mcpServers 下（对所有项目生效），也可以放进项目根目录的 .mcp.json。",
+	}
+	noteClaudeToken = text{
+		"Set %[1]s in the environment that starts Claude Code; Claude Code expands ${%[1]s} in the header.",
+		"在启动 Claude Code 的环境中设置 %[1]s；Claude Code 会在请求头中展开 ${%[1]s}。",
+	}
+	noteCodexXDG = text{
+		"XDG_CONFIG_HOME is set and Codex does not pass it to stdio servers, so the entry sets it. Without it routerctl would keep its locks, recovery records, known hosts and saved passwords under ~/.config/routerctl, apart from the routerctl you run yourself.",
+		"XDG_CONFIG_HOME 已设置，而 Codex 不会把它传给 stdio 服务，所以条目里写入了它。否则 routerctl 会把锁、变更结果记录、known_hosts 和保存的密码放在 ~/.config/routerctl，与你自己运行的 routerctl 分开。",
+	}
+	noteCodexToken = text{"Codex sends the value of %s as the bearer token.", "Codex 会把 %s 的值作为 Bearer 令牌发送。"}
+	notePiExposure = text{
+		`"exposure": "direct" lets the model see the tools; pi's default codemode hides them.`,
+		`"exposure": "direct" 让模型直接看到这些工具；pi 默认的 code mode 会隐藏它们。`,
+	}
+	noteDshMerge = text{
+		"Merge the insert into the existing file, or save it separately and start dsh with --patch <file>.",
+		"把这段 insert 合并进已有文件，或单独保存后用 dsh --patch <文件> 启动。",
+	}
+	noteDshToken  = text{"The !!js expression reads %s when dsh loads its configuration.", "!!js 表达式在 dsh 加载配置时读取 %s。"}
+	noteWorkBuddy = text{
+		"Add it in 专家·技能·连接器 → 连接器 → 自定义连接器, or edit the file. WorkBuddy documents only stdio MCP servers.",
+		"在「专家·技能·连接器 → 连接器 → 自定义连接器」中添加，或直接编辑该文件。WorkBuddy 只文档化了 stdio 方式的 MCP 服务。",
+	}
+	noteGenericStdio = text{
+		"Most MCP clients accept this mcpServers entry; others ask for the command routerctl and the argument mcp.",
+		"多数 MCP 客户端接受这个 mcpServers 条目；其他客户端会分别要求填写命令 routerctl 和参数 mcp。",
+	}
+	noteGenericHTTP = text{
+		"Replace <token> with the access token. Some clients call this type streamable-http.",
+		"把 <token> 换成访问令牌。有些客户端把这种类型叫 streamable-http。",
+	}
+)
+
+// say returns a note in the request's language, formatted when it takes arguments.
+func (p platform) say(note text, arguments ...any) string {
+	format := note.en
+	if p.zh {
+		format = note.zh
+	}
+	if len(arguments) == 0 {
+		return format
+	}
+	return fmt.Sprintf(format, arguments...)
+}
 
 func stdioSetup(agent, command string, env platform) Setup {
 	quoted := env.quote.quote(command)
@@ -237,7 +311,7 @@ func stdioSetup(agent, command string, env platform) Setup {
 			File: "~/.claude.json", Format: "json",
 			Snippet: pretty(object{{"mcpServers", object{{serverName, object{{"type", "stdio"}, {"command", command}, {"args", []string{"mcp"}}}}}}}),
 			Command: "claude mcp add --transport stdio --scope user " + serverName + " -- " + quoted + " mcp",
-			Notes:   []string{"Run the command, or add the entry under mcpServers in that file (all projects) or in .mcp.json at a project root.", writeApprovalNote},
+			Notes:   []string{env.say(noteClaudeFile), env.say(noteWriteApproval)},
 		}
 	case Codex:
 		setup := Setup{
@@ -250,39 +324,39 @@ func stdioSetup(agent, command string, env platform) Setup {
 		if xdg := env.getenv("XDG_CONFIG_HOME"); env.xdg && strings.HasPrefix(xdg, "/") && !env.defaultConfigHome(xdg) {
 			setup.Snippet += "\n[mcp_servers." + serverName + ".env]\nXDG_CONFIG_HOME = " + tomlString(xdg) + "\n"
 			setup.Command = "codex mcp add " + serverName + " --env " + env.quote.quote("XDG_CONFIG_HOME="+xdg) + " -- " + quoted + " mcp"
-			setup.Notes = append(setup.Notes, "XDG_CONFIG_HOME is set and Codex does not pass it to stdio servers, so the entry sets it. Without it routerctl would keep its locks, recovery records, known hosts and saved passwords under ~/.config/routerctl, apart from the routerctl you run yourself.")
+			setup.Notes = append(setup.Notes, env.say(noteCodexXDG))
 		}
 		return setup
 	case OpenCode:
 		return Setup{
 			File: "~/.config/opencode/opencode.json", Format: "json",
 			Snippet: pretty(object{{"$schema", "https://opencode.ai/config.json"}, {"mcp", object{{serverName, object{{"type", "local"}, {"command", []string{command, "mcp"}}}}}}}),
-			Notes:   append([]string(nil), openCodeNotes...),
+			Notes:   []string{env.say(noteOpenCodeForm), env.say(noteOpenCodeTimeout)},
 		}
 	case Pi:
 		return Setup{
 			File: "~/.pi/agent/mcp.json", Format: "json",
 			Snippet: pretty(object{{"mcpServers", object{{serverName, object{{"command", command}, {"args", []string{"mcp"}}, {"exposure", "direct"}}}}}}),
 			Command: "pi mcp add " + serverName + " --exposure direct -- " + quoted + " mcp",
-			Notes:   []string{`"exposure": "direct" lets the model see the tools; pi's default codemode hides them.`},
+			Notes:   []string{env.say(notePiExposure)},
 		}
 	case DSH:
 		return Setup{
 			File: "~/.dsh/cordis.patch.yml", Format: "yaml",
 			Snippet: dshEntry("transport: stdio\n        command: " + yamlString(command) + "\n        args: [mcp]\n"),
-			Notes:   []string{"Merge the insert into the existing file, or save it separately and start dsh with --patch <file>."},
+			Notes:   []string{env.say(noteDshMerge)},
 		}
 	case WorkBuddy:
 		return Setup{
 			File: "~/.workbuddy/mcp.json", Format: "json",
 			Snippet: pretty(object{{"mcpServers", object{{serverName, object{{"command", command}, {"args", []string{"mcp"}}}}}}}),
-			Notes:   []string{"Add it in 专家·技能·连接器 → 连接器 → 自定义连接器, or edit the file. WorkBuddy documents only stdio MCP servers."},
+			Notes:   []string{env.say(noteWorkBuddy)},
 		}
 	default:
 		return Setup{
 			Format:  "json",
 			Snippet: pretty(object{{"mcpServers", object{{serverName, object{{"command", command}, {"args", []string{"mcp"}}}}}}}),
-			Notes:   []string{"Most MCP clients accept this mcpServers entry; others ask for the command routerctl and the argument mcp."},
+			Notes:   []string{env.say(noteGenericStdio)},
 		}
 	}
 }
@@ -295,7 +369,7 @@ func httpSetup(agent, endpoint string, env platform) Setup {
 		setup := Setup{
 			File: "~/.claude.json", Format: "json",
 			Snippet: pretty(object{{"mcpServers", object{{serverName, entry}}}}),
-			Notes:   []string{"Set " + tokenEnv + " in the environment that starts Claude Code; Claude Code expands ${" + tokenEnv + "} in the header.", writeApprovalNote},
+			Notes:   []string{env.say(noteClaudeToken, tokenEnv), env.say(noteWriteApproval)},
 		}
 		if !windows {
 			setup.Command = "claude mcp add-json " + serverName + " " + env.quote.quote(compact(entry)) + " --scope user"
@@ -306,7 +380,7 @@ func httpSetup(agent, endpoint string, env platform) Setup {
 			File: "~/.codex/config.toml", Format: "toml",
 			Snippet: "[mcp_servers." + serverName + "]\nurl = " + tomlString(endpoint) + "\nbearer_token_env_var = \"" + tokenEnv + "\"\n",
 			Command: "codex mcp add " + serverName + " --url " + env.quote.quote(endpoint) + " --bearer-token-env-var " + tokenEnv,
-			Notes:   []string{"Codex sends the value of " + tokenEnv + " as the bearer token."},
+			Notes:   []string{env.say(noteCodexToken, tokenEnv)},
 		}
 	case OpenCode:
 		return Setup{
@@ -314,7 +388,7 @@ func httpSetup(agent, endpoint string, env platform) Setup {
 			Snippet: pretty(object{{"$schema", "https://opencode.ai/config.json"}, {"mcp", object{{serverName, object{
 				{"type", "remote"}, {"url", endpoint}, {"oauth", false}, {"headers", object{{"Authorization", "Bearer {env:" + tokenEnv + "}"}}},
 			}}}}}),
-			Notes: append([]string{"Edit the file: opencode mcp add cannot turn OAuth off."}, openCodeNotes...),
+			Notes: []string{env.say(noteOpenCodeOAuth), env.say(noteOpenCodeForm), env.say(noteOpenCodeTimeout)},
 		}
 	case Pi:
 		return Setup{
@@ -323,13 +397,13 @@ func httpSetup(agent, endpoint string, env platform) Setup {
 				{"type", "http"}, {"url", endpoint}, {"headers", object{{"Authorization", "Bearer ${" + tokenEnv + "}"}}}, {"exposure", "direct"},
 			}}}}}),
 			Command: "pi mcp add " + serverName + " --url " + env.quote.quote(endpoint) + " --bearer-token-env-var " + tokenEnv + " --exposure direct",
-			Notes:   []string{`"exposure": "direct" lets the model see the tools; pi's default codemode hides them.`},
+			Notes:   []string{env.say(notePiExposure)},
 		}
 	case DSH:
 		return Setup{
 			File: "~/.dsh/cordis.patch.yml", Format: "yaml",
 			Snippet: dshEntry("transport: streamable-http\n        url: " + yamlString(endpoint) + "\n        headers:\n          Authorization: !!js '`Bearer ${process.env." + tokenEnv + "}`'\n"),
-			Notes:   []string{"The !!js expression reads " + tokenEnv + " when dsh loads its configuration.", "Merge the insert into the existing file, or save it separately and start dsh with --patch <file>."},
+			Notes:   []string{env.say(noteDshToken, tokenEnv), env.say(noteDshMerge)},
 		}
 	default:
 		return Setup{
@@ -337,7 +411,7 @@ func httpSetup(agent, endpoint string, env platform) Setup {
 			Snippet: pretty(object{{"mcpServers", object{{serverName, object{
 				{"type", "http"}, {"url", endpoint}, {"headers", object{{"Authorization", "Bearer <token>"}}},
 			}}}}}),
-			Notes: []string{"Replace <token> with the access token. Some clients call this type streamable-http."},
+			Notes: []string{env.say(noteGenericHTTP)},
 		}
 	}
 }

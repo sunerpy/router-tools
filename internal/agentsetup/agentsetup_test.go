@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"unicode"
 
 	"github.com/sunerpy/router-tools/internal/agentsetup"
 )
@@ -380,7 +381,7 @@ func TestInstallSkill(t *testing.T) {
 	if err := os.WriteFile(extra, []byte("mine\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := agentsetup.InstallSkill(skillFS(), files, root, "router-tools", false); err == nil || !strings.Contains(err.Error(), "--force") || !errors.Is(err, agentsetup.ErrRefused) {
+	if _, err := agentsetup.InstallSkill(skillFS(), files, root, "router-tools", false); err == nil || !strings.Contains(err.Error(), "--force") || !errors.Is(err, agentsetup.ErrRefused) || !errors.Is(err, agentsetup.ErrDiffers) {
 		t.Fatalf("a changed skill was overwritten without force: %v", err)
 	}
 	if data, _ := os.ReadFile(edited); string(data) != "edited by the user\n" {
@@ -408,7 +409,7 @@ func TestInstallSkillRefusesSymlinksAndFiles(t *testing.T) {
 	if err := os.Symlink(elsewhere, filepath.Join(root, "router-tools")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := agentsetup.InstallSkill(skillFS(), []string{"SKILL.md"}, root, "router-tools", true); !errors.Is(err, agentsetup.ErrRefused) {
+	if _, err := agentsetup.InstallSkill(skillFS(), []string{"SKILL.md"}, root, "router-tools", true); !errors.Is(err, agentsetup.ErrRefused) || errors.Is(err, agentsetup.ErrDiffers) {
 		t.Fatalf("installed through a symbolic link: %v", err)
 	}
 	fileRoot := t.TempDir()
@@ -449,4 +450,50 @@ func TestInstallSkillRefusesSymlinksAndFiles(t *testing.T) {
 	if entries, _ := os.ReadDir(outside); len(entries) != 0 {
 		t.Fatal("wrote through the symbolic link inside the skill")
 	}
+}
+
+// The desktop shows notes in Simplified Chinese: every note of every setup has a Chinese text, and the
+// English and Chinese setups carry the same notes otherwise.
+func TestChineseNotes(t *testing.T) {
+	t.Parallel()
+	hasHan := func(text string) bool {
+		for _, r := range text {
+			if unicode.Is(unicode.Han, r) {
+				return true
+			}
+		}
+		return false
+	}
+	env := envOf(map[string]string{"CLAUDE_CONFIG_DIR": "/work/claude", "XDG_CONFIG_HOME": "/home/u/.xdg", "HOME": "/home/u"})
+	for _, agent := range agentsetup.Agents() {
+		for _, url := range []string{"", endpoint} {
+			if url != "" && !agent.HTTP {
+				continue
+			}
+			for _, goos := range []string{"linux", "windows"} {
+				command := posixCommand
+				if goos == "windows" {
+					command = `C:\Users\a$b\routerctl.exe`
+				}
+				english, err := agentsetup.Build(agentsetup.Request{Agent: agent.ID, Command: command, URL: url, OS: goos, Getenv: env})
+				if err != nil {
+					t.Fatal(err)
+				}
+				chinese, err := agentsetup.Build(agentsetup.Request{Agent: agent.ID, Command: command, URL: url, OS: goos, Getenv: env, Lang: "zh"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(chinese.Notes) != len(english.Notes) || len(chinese.Notes) == 0 || chinese.Snippet != english.Snippet || chinese.Command != english.Command {
+					t.Fatalf("%s %q %s: english %q, chinese %q", agent.ID, url, goos, english.Notes, chinese.Notes)
+				}
+				for _, note := range chinese.Notes {
+					if !hasHan(note) {
+						t.Fatalf("%s %q %s: an English note in the Chinese setup: %q", agent.ID, url, goos, note)
+					}
+				}
+			}
+		}
+	}
+	desktop := build(t, agentsetup.Codex, endpoint, "linux", posixCommand)
+	mustContain(t, "english token note", strings.Join(desktop.Notes, "\n"), "routerctl mcp token")
 }

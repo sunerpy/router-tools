@@ -24,6 +24,7 @@ type fakeBackend struct {
 	requests []fakeRequest
 	gate     chan struct{}
 	started  chan string
+	sources  map[string]string
 
 	doctor    func(guiapi.OperationRequest) (app.DoctorReport, error)
 	planReady bool
@@ -39,7 +40,7 @@ type fakeRequest struct {
 }
 
 func newFakeBackend() *fakeBackend {
-	return &fakeBackend{planReady: true, started: make(chan string, 64)}
+	return &fakeBackend{planReady: true, started: make(chan string, 64), sources: make(map[string]string)}
 }
 
 func (f *fakeBackend) record(method string, operation guiapi.OperationRequest, guide guiapi.GuideRequest) {
@@ -63,6 +64,9 @@ func (f *fakeBackend) calls() []fakeRequest {
 }
 
 func (f *fakeBackend) block(ctx context.Context, operationID string) error {
+	f.mu.Lock()
+	f.sources[operationID] = guiapi.SourceFrom(ctx)
+	f.mu.Unlock()
 	if f.emit != nil {
 		f.emit(operationID)
 	}
@@ -323,4 +327,10 @@ func hasPrefixAll(t *testing.T, id string) {
 	if !strings.HasPrefix(id, "agent-") || len(id) != len("agent-")+32 {
 		t.Fatalf("operation ID %q is not agent- plus 32 hex", id)
 	}
+}
+
+func (f *fakeBackend) source(operationID string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.sources[operationID]
 }
