@@ -241,6 +241,8 @@ An independent review (install safety, host formats, documentation and skill len
 
 A second round checked closure and looked for defects the fixes introduced. All round-1 items were closed; the new defects each got a red test. Two CLI tests read the developer's own `CLAUDE_CONFIG_DIR` and `CODEX_HOME`, and with the first set a test installed the skill into the real Claude Code directory: the tests now clear every override variable and point the home directory at a temporary one. The override test used `\work\claude`, which is not absolute on Windows and would have failed the Windows CI job: it uses temporary directories now. A named pipe in place of an installed file blocked the comparison: only regular files are read, anything else counts as changed. opencode 2.x takes `OPENCODE_CONFIG_DIR` as its global directory (source) and 1.18.18 loaded a server from it (checked), so it now wins over `XDG_CONFIG_HOME`. An `XDG_CONFIG_HOME` equal to `$HOME/.config` splits nothing and no longer gets a Codex entry or warning. The host-key texts overstated their premises: an already known key needs no flag, a run with SSH already on stops before any write, and a changed key is refused either way; the skill, the server instructions, the documentation and the spec now say so, and the refused-entry wording in the spec and usage matches the code.
 
+The Windows CI job then failed both skill tests: Git for Windows checks text files out with CRLF, so the embedded `SKILL.md` started with `---\r\n` and a Windows build would embed other bytes than every other build. A clone with `core.autocrlf=true` reproduced it; `.gitattributes` now keeps `skills/**` in LF, and the same clone then checked the file out with LF.
+
 ## Required final gates
 
 ```bash
