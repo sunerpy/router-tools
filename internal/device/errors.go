@@ -45,8 +45,10 @@ const (
 	CodeCredentialStoreFailed = "CREDENTIAL_STORE_FAILED"
 	CodeTelnetAuthFailed      = "TELNET_AUTH_FAILED"
 	CodeTelnetUnreachable     = "TELNET_UNREACHABLE"
-	CodeCanceled              = "CANCELED"
-	CodeInternalError         = "INTERNAL_ERROR"
+	// CodeAgentWritesDisabled refuses an agent's router write while writes are not enabled for agents.
+	CodeAgentWritesDisabled = "AGENT_WRITES_DISABLED"
+	CodeCanceled            = "CANCELED"
+	CodeInternalError       = "INTERNAL_ERROR"
 )
 
 // Error is a stable, frontend-independent device error.

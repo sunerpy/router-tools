@@ -10,6 +10,7 @@ import (
 	"github.com/sunerpy/router-tools/internal/cli"
 	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
+	"github.com/sunerpy/router-tools/internal/guiapi"
 	"github.com/sunerpy/router-tools/internal/secret"
 	"github.com/sunerpy/router-tools/internal/state"
 	"github.com/sunerpy/router-tools/internal/wiring"
@@ -28,7 +29,9 @@ var (
 	_ cli.DeepService         = (*app.Service)(nil)
 	_ cli.GuideService        = (*app.Service)(nil)
 	_ cli.RecoveryService     = (*app.Service)(nil)
-	_ cli.CredentialService   = (*app.Service)(nil)
+	// routerctl mcp composes guiapi over the application service.
+	_ guiapi.Application    = (*app.Service)(nil)
+	_ cli.CredentialService = (*app.Service)(nil)
 )
 
 func isolateUserDirs(t *testing.T) string {

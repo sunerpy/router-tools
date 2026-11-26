@@ -23,6 +23,7 @@
 - Strict non-secret JSON configuration, per-router flock, private run reports, human and single-object JSON output.
 - A write-ahead recovery record per router that blocks further changes after an uncertain one until `recovery ack`.
 - Opt-in saved passwords in an AES-256-GCM vault (`--remember-password`, `--use-saved-password`, `credentials list|forget`), saved only after the router accepted them and never sent over Telnet.
+- `routerctl mcp`: a Model Context Protocol server for AI agents over stdio, or Streamable HTTP with a bearer token; router writes only with `--allow-writes`, deep persistence and recovery acknowledgement never (see [docs/usage.md](docs/usage.md#agent-access-mcp) and `RISKS.md`).
 
 ## Command tree
 
@@ -44,9 +45,11 @@ routerctl
 ├── deep-persist --backup-dir <verified-directory>
 ├── recovery
 │   └── ack
-└── credentials
-    ├── list
-    └── forget [--kind] [--scope] [--host] [--port] | --all
+├── credentials
+│   ├── list
+│   └── forget [--kind] [--scope] [--host] [--port] | --all
+└── mcp [--http <ip:port>] [--allow-writes] [--token-file <file>]
+    └── token
 ```
 
 Run `routerctl <command> --help` for command flags. See [docs/usage.md](docs/usage.md) for secret input and examples.

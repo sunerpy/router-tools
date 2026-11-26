@@ -10,7 +10,7 @@ cmd/routerctl and future frontends
                 -> reusable protocol, transport, backup, and workflow packages
 ```
 
-Only the composition root `internal/wiring`, used by both mains, wires concrete adapters through `internal/devices/builtin` (`Adapters()` and `Discovery()`), together with the flock locker, the outcome store and the managed directories. `internal/app` and `internal/cli` do not import an adapter or the builtin list. A future GUI must call the same typed application services in process; it must not scrape human CLI output or expose a localhost control service.
+Only the composition root `internal/wiring`, used by both mains, wires concrete adapters through `internal/devices/builtin` (`Adapters()` and `Discovery()`), together with the flock locker, the outcome store and the managed directories. `internal/app` and `internal/cli` do not import an adapter or the builtin list. Frontends (CLI, desktop, MCP server) call the same typed application services in process and never scrape human CLI output. The MCP server (`internal/mcpserver`, below) is the only control service; it runs only when the user starts it and its HTTP transport always requires a token.
 
 ## Exact profiles and capabilities
 
@@ -55,6 +55,15 @@ A remote write timeout is `unknown`. Accepted writes followed by failure are at 
 ## Guided flow
 
 `GuidePlan` detects read-only and plans `enable_ssh -> backup -> soft_install -> reboot_verify` for the selected goals; a step whose goal is already in place is skipped. Root evidence comes from password-authenticated SSH only, soft state from the adapter's `SoftInspector`, and backup state from the local managed backup directory. A ready plan carries a secret-free confirmation (target, device identity, profile, goals, reset choice, each step's action and effects) and the SHA-256 of its JSON. `GuideApply` accepts that confirmation only with a matching digest, detects again with the confirmed profile, and allows each step only to keep its action or do less with unchanged effects. It then runs each step through the step's own use case with the confirmed identity, which the use case checks again under the lock, and stops at the first step that does not succeed. The guided flow never uses Telnet and never includes deep persistence or soft-persistence removal.
+
+## Agent access (MCP)
+
+`internal/mcpserver` is a frontend over `internal/guiapi.Service`, the same facade the desktop uses, so every use-case gate applies unchanged. `routerctl mcp` composes `guiapi.New(service, operations, nil)` (no host-key confirmer) and serves it over stdio or, with `--http`, over Streamable HTTP. The package never imports an adapter.
+
+- Tools are registered with the SDK's low-level `Server.AddTool`; the advertised schema comes from `jsonschema.For`, and handlers decode arguments exactly with `encoding/json/v2` (case-sensitive names, no unknown or duplicate members), so no error text can quote an argument name or value. A saved password is never combined with an agent-supplied host key pin. Each tool has an annotation class: R (no side effect), L (router untouched, local vault or files may change), W (router write or cancel). Router writes (`guide_apply`, `soft_remove`) are registered only while writes are enabled and re-check the switch when called.
+- Every use-case call becomes an operation owned by the server, not by the request: a call waits at most 50 seconds, and a client cancellation or timeout only ends the wait. `operation_cancel`, `Stop`/`Shutdown` and process exit cancel operations; a stop also ends waiting calls at once. Events are redacted when they arrive and results when the operation ends, value by value, after which the operation keeps no password. Guided plans are kept server-side under a one-shot `plan_id`.
+- HTTP wraps the SDK handler in cross-origin protection and a bearer-token check (SHA-256, constant-time), keeps the SDK's DNS-rebinding protection, caps bodies at 1 MiB and serves only `/mcp`.
+- Each tool call writes a `call` audit record and each operation a `finish` record (before it is marked done); calls the SDK rejects before any handler are audited by a receiving middleware. The CLI prints the records as JSON lines on stderr. No record carries arguments, passwords, tokens or report bodies.
 
 ## Local integrity and journals
 

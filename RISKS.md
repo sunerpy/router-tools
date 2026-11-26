@@ -33,6 +33,19 @@ The router is identified by its normalized address, not by its ports: one lock, 
 
 A saved root password is never sent over Telnet and never to an SSH host key that was not already known, pinned or confirmed by you. A saved password the router refuses is marked rejected and not used again until you type the right one and save it again with `--remember-password`. Deep persistence never uses saved passwords.
 
+## Agent access (MCP)
+
+`routerctl mcp` lets an AI agent call the same detection, backup and guided setup as the CLI. It runs only when you start it, and router writes (`guide_apply`, `soft_remove`) exist only when you start it with `--allow-writes`. Deep persistence, the recovery acknowledgement, forgetting saved passwords and Telnet are never available to agents.
+
+- **Passwords in the agent's transcript.** Passwords an agent passes as tool arguments are stored in the agent host's conversation history and sent to its model provider. Router Tools never logs or echoes them, but it cannot remove them from the host. Prefer passwords you saved with `--remember-password` and let the agent use `use_saved_password`.
+- **The write switch is consent, not a sandbox.** An agent that also has shell or file access can run `routerctl` directly or edit its own MCP configuration to add `--allow-writes`. Restricting that is the job of the agent host's permission settings. Hosts that auto-approve tool calls (bypass or auto modes) will run writes without asking you; in Claude Code, `permissions.ask` rules for `mcp__router-tools__guide_apply`, `mcp__router-tools__soft_remove` and `mcp__router-tools__operation_cancel` force a prompt.
+- **One confirmation, several writes.** `guide_apply` runs the whole plan that `guide_plan` returned, like `setup`. Read the plan's steps and effects (or have the agent show them) before letting it apply. A plan can be applied once; a repeat needs a new `guide_plan`.
+- **Long operations continue after the agent stops waiting.** A call returns after at most 50 seconds and the operation keeps running; the agent must poll `operation_wait`. A host timeout does not stop a write. When the host ends the session it may kill a stdio server within a second; an interrupted write then leaves a blocking recovery record (see RECOVERY.md).
+- **HTTP on the local network.** `--http` always requires a token. Bound to a non-loopback address, the token and any passwords in tool arguments cross the network in plaintext, and anyone holding the token can use every tool the server offers. Use `127.0.0.1`, or a network you trust, and rotate the token when in doubt.
+- **Host keys.** A saved root password is never sent with a fingerprint the agent supplied, because a pin replaces the known_hosts check. With a password the agent passes itself, `host_key_sha256` and `accept_new_host_key` trust whatever the agent says; only accept fingerprints you gave it.
+- **Local paths in results.** Reports include the managed backup and journal paths, which contain your user name; they reach the agent's model provider.
+- **Device text in results.** Model names and other strings reported by the router appear in tool results. Agents should treat them as data, not instructions.
+
 ## Soft persistence and reboot
 
 Soft persistence installs `/data/auto_ssh/auto_ssh.sh` and the `firewall.auto_ssh` include. Installation verification does not prove boot behavior. Only `reboot-verify` or an equivalent manual reboot can establish that.

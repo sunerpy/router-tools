@@ -308,7 +308,7 @@ func TestRecoveryAckRequiresConfirmationAndUsesTheTarget(t *testing.T) {
 func TestRecoveryAndStateCodesHaveDocumentedExitCodes(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]int{device.CodeRecoveryReviewRequired: 9, device.CodeStateStoreFailed: 11}
+	cases := map[string]int{device.CodeRecoveryReviewRequired: 9, device.CodeStateStoreFailed: 11, device.CodeAgentWritesDisabled: 9}
 	for code, want := range cases {
 		service := &fakeGuideService{ackErr: &device.Error{Code: code, Message: "x"}}
 		got, _, _ := executeWithInput(t, service, "", "--non-interactive", "--yes", "recovery", "ack")
