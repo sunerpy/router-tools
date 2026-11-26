@@ -265,6 +265,8 @@ A fifth round closed every round-4 item and confirmed three minor defects, each 
 
 A sixth round closed every round-5 item and found no new defect in the code. It noted that spec §9.3 item 2 has promised to show the old and new fingerprints of a changed key since before this work, while the code reports only `HOST_KEY_MISMATCH`; item 8, added here, now states what a rekey with another key does (the connection is refused and closed, a running command reads `REMOTE_RESULT_UNKNOWN`) instead of pointing at item 2. Item 2 itself is left for a separate decision.
 
+CI then failed `TestMCPStdioKeepsStdoutForProtocolMessages` (from §34) once: the `tools/list` response was missing. The SDK answers calls concurrently, so `tools/call` (id 3) can finish before `tools/list` (id 2), and the test closed stdin as soon as it saw id 3, which ends the session before the listing is written. Two hundred local runs, with one and two CPUs, never reproduced it. The test now waits for both responses before closing stdin; its assertions are unchanged.
+
 ## Required final gates
 
 ```bash
