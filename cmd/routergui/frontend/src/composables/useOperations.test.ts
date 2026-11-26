@@ -1,5 +1,5 @@
 import { nextTick } from "vue";
-import { useOperations } from "./useOperations";
+import { HOST_KEY_GAP_MS, useOperations } from "./useOperations";
 import type { RouterAPI } from "../services/api";
 
 function makeAPI(): RouterAPI {
@@ -28,6 +28,14 @@ function makeAPI(): RouterAPI {
     ResolveHostKey: vi.fn(),
     OnProgress: vi.fn().mockReturnValue(() => {}),
     OnHostKey: vi.fn().mockReturnValue(() => {}),
+    OnHostKeyExpired: vi.fn().mockReturnValue(() => {}),
+    AgentStatus: vi.fn(),
+    AgentApply: vi.fn(),
+    AgentNewToken: vi.fn(),
+    AgentSetup: vi.fn(),
+    AgentInstallSkill: vi.fn(),
+    AgentCancel: vi.fn().mockResolvedValue(true),
+    OnAgentStatus: vi.fn().mockReturnValue(() => {}),
   };
 }
 
@@ -194,6 +202,109 @@ describe("useOperations", () => {
     await store.resolveHostKey(true);
     expect(api.ResolveHostKey).toHaveBeenCalledWith("prompt-1", true);
     expect(store.hostKeyPrompt).toBeNull();
+  });
+
+  function hostKeyListeners(api: RouterAPI) {
+    const listeners = {} as { prompt: (prompt: any) => void; expired: (promptID: string) => void };
+    vi.mocked(api.OnHostKey).mockImplementation((callback) => {
+      listeners.prompt = callback;
+      return () => {};
+    });
+    vi.mocked(api.OnHostKeyExpired).mockImplementation((callback) => {
+      listeners.expired = callback;
+      return () => {};
+    });
+    return listeners;
+  }
+
+  const keyPrompt = (id: string) => ({
+    prompt_id: id,
+    operation_id: `op-${id}`,
+    address: `${id}:22`,
+    algorithm: "ssh-ed25519",
+    fingerprint: `SHA256:${id}`,
+  });
+
+  it("queues concurrent host-key prompts and never replaces the one shown", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = makeAPI();
+      const listeners = hostKeyListeners(api);
+      const store = useOperations(api);
+      listeners.prompt(keyPrompt("a"));
+      listeners.prompt(keyPrompt("b"));
+      expect(store.hostKeyPrompt?.prompt_id).toBe("a");
+      expect(store.hostKeyWaiting).toBe(1);
+      await store.resolveHostKey(true);
+      expect(api.ResolveHostKey).toHaveBeenCalledWith("a", true);
+      expect(store.hostKeyPrompt).toBeNull();
+      // A pause between dialogs, so a double click cannot answer the next prompt.
+      vi.advanceTimersByTime(HOST_KEY_GAP_MS - 1);
+      await store.resolveHostKey(true);
+      expect(api.ResolveHostKey).toHaveBeenCalledTimes(1);
+      listeners.prompt(keyPrompt("c"));
+      expect(store.hostKeyPrompt).toBeNull();
+      vi.advanceTimersByTime(1);
+      expect(store.hostKeyPrompt?.prompt_id).toBe("b");
+      expect(store.hostKeyWaiting).toBe(1);
+      await store.resolveHostKey(false);
+      expect(api.ResolveHostKey).toHaveBeenLastCalledWith("b", false);
+      vi.advanceTimersByTime(HOST_KEY_GAP_MS);
+      expect(store.hostKeyPrompt?.prompt_id).toBe("c");
+      expect(store.hostKeyWaiting).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pauses after every answer, also when nothing was queued", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = makeAPI();
+      const listeners = hostKeyListeners(api);
+      const store = useOperations(api);
+      listeners.prompt(keyPrompt("a"));
+      await store.resolveHostKey(true);
+      // Another operation's prompt arrives right after the first click of a double click.
+      vi.advanceTimersByTime(100);
+      listeners.prompt(keyPrompt("b"));
+      expect(store.hostKeyPrompt).toBeNull();
+      await store.resolveHostKey(true);
+      expect(api.ResolveHostKey).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(HOST_KEY_GAP_MS);
+      expect(store.hostKeyPrompt?.prompt_id).toBe("b");
+      // A withdrawn prompt is followed by the same pause.
+      listeners.prompt(keyPrompt("c"));
+      listeners.expired("b");
+      expect(store.hostKeyPrompt).toBeNull();
+      vi.advanceTimersByTime(HOST_KEY_GAP_MS);
+      expect(store.hostKeyPrompt?.prompt_id).toBe("c");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops host-key prompts the backend stopped waiting for", async () => {
+    vi.useFakeTimers();
+    try {
+      const api = makeAPI();
+      const listeners = hostKeyListeners(api);
+      const store = useOperations(api);
+      listeners.prompt(keyPrompt("a"));
+      listeners.prompt(keyPrompt("b"));
+      listeners.prompt(keyPrompt("c"));
+      listeners.expired("b");
+      expect(store.hostKeyWaiting).toBe(1);
+      listeners.expired("a");
+      expect(store.hostKeyPrompt).toBeNull();
+      vi.advanceTimersByTime(HOST_KEY_GAP_MS);
+      expect(store.hostKeyPrompt?.prompt_id).toBe("c");
+      listeners.expired("unknown");
+      expect(store.hostKeyPrompt?.prompt_id).toBe("c");
+      expect(api.ResolveHostKey).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shows failed, partial, and unknown reports resolved by the backend", async () => {

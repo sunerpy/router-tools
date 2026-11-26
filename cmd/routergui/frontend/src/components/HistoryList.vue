@@ -2,14 +2,18 @@
 import type { Component } from "vue";
 import {
   Activity,
+  Bot,
   Database,
   FileClock,
   HeartPulse,
   KeyRound,
+  ListChecks,
   RotateCcw,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
 } from "lucide-vue-next";
+import AppBadge from "./AppBadge.vue";
 import StatusBadge from "./StatusBadge.vue";
 import type { OperationRow } from "../services/summary";
 
@@ -27,6 +31,18 @@ const ICONS: Record<string, Component> = {
   "backup verify": Database,
   "backup verify online": Database,
   "deep-persist": ShieldAlert,
+  // Agent tools use the icon of the use case they call.
+  preflight: HeartPulse,
+  guide_plan: Sparkles,
+  guide_apply: Sparkles,
+  backup_create: Database,
+  deep_status: ShieldAlert,
+  soft_remove: Activity,
+  saved_passwords: KeyRound,
+  list_profiles: ListChecks,
+  operation_wait: Bot,
+  operation_list: Bot,
+  operation_cancel: Bot,
 };
 const TONES: Record<string, string> = {
   succeeded: "ok",
@@ -58,6 +74,7 @@ const TONES: Record<string, string> = {
           <span class="history-list__meta mono">{{ row.meta }}</span>
         </span>
         <span class="history-list__end">
+          <AppBadge v-if="row.agent" tone="info" :icon="Bot">Agent</AppBadge>
           <StatusBadge :status="row.status" />
           <slot name="actions" :row="row" />
         </span>

@@ -60,6 +60,7 @@ func TestPathsAreManagedUnderTheUserDirectories(t *testing.T) {
 		DeepJournal: filepath.Join(configDir, "routerctl", "deep"),
 		Backups:     filepath.Join(home, "RouterTools", "backups"),
 		Credentials: filepath.Join(configDir, "routerctl", "credentials"),
+		MCP:         filepath.Join(configDir, "routerctl", "mcp"),
 	}
 	if paths != want {
 		t.Fatalf("DefaultPaths() = %+v, want %+v", paths, want)

@@ -41,13 +41,23 @@ func SkillRoot(agent, home string, getenv func(string) string) (string, error) {
 // symbolic link or non-directory where the skill would be written. Other errors come from the file system.
 var ErrRefused = errors.New("skill installation refused")
 
-type refusal string
+// ErrDiffers marks the refusal of an installed copy that differs; installing again with force replaces it.
+var ErrDiffers = errors.New("installed skill differs")
 
-func (r refusal) Error() string { return string(r) }
+type refusal struct {
+	message string
+	differs bool
+}
 
-func (refusal) Is(target error) bool { return target == ErrRefused }
+func (r refusal) Error() string { return r.message }
 
-func refuse(format string, arguments ...any) error { return refusal(fmt.Sprintf(format, arguments...)) }
+func (r refusal) Is(target error) bool {
+	return target == ErrRefused || (r.differs && target == ErrDiffers)
+}
+
+func refuse(format string, arguments ...any) error {
+	return refusal{message: fmt.Sprintf(format, arguments...)}
+}
 
 // InstallResult reports a skill installation.
 type InstallResult struct {
@@ -93,7 +103,10 @@ func InstallSkill(source fs.FS, files []string, root, name string, force bool) (
 		return InstallResult{Path: target, Action: "unchanged", Files: files}, nil
 	}
 	if !force {
-		return InstallResult{}, refuse("%s differs from the skill this routerctl ships (%s); rerun with --force to replace those files", target, strings.Join(changed, ", "))
+		return InstallResult{}, refusal{
+			message: fmt.Sprintf("%s differs from the skill this routerctl ships (%s); rerun with --force to replace those files", target, strings.Join(changed, ", ")),
+			differs: true,
+		}
 	}
 	for _, file := range changed {
 		if err := writeInside(source, target, file); err != nil {

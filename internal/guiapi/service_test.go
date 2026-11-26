@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/sunerpy/router-tools/internal/app"
 	"github.com/sunerpy/router-tools/internal/credentials"
@@ -15,6 +16,8 @@ import (
 )
 
 type fakeApplication struct {
+	askHostKey        bool
+	accepted          bool
 	doctorRequest     app.DoctorRequest
 	verifyRequest     app.VerifyRequest
 	deepRequest       app.DeepRequest
@@ -52,6 +55,10 @@ func (f *fakeApplication) Doctor(ctx context.Context, request app.DoctorRequest,
 
 func (f *fakeApplication) Verify(_ context.Context, request app.VerifyRequest, _ app.EventSink) (app.VerifyReport, error) {
 	f.verifyRequest = request
+	if f.askHostKey {
+		// The SSH handshake meets an unknown key while the operation runs.
+		f.accepted = request.HostKeyPolicy.Confirm(hostkey.Prompt{Address: "192.168.31.1:22"})
+	}
 	return app.VerifyReport{Status: app.StatusSucceeded, RootVerified: true, SSHVerified: true}, nil
 }
 
@@ -160,7 +167,50 @@ func (r *eventRecorder) Emit(id string, event app.Event) {
 
 type confirmer struct{ called bool }
 
-func (c *confirmer) Confirm(_ string, _ hostkey.Prompt) bool { c.called = true; return true }
+func (c *confirmer) Confirm(_ context.Context, _ string, _ hostkey.Prompt) bool {
+	c.called = true
+	return true
+}
+
+// waitingConfirmer is a host-key dialog nobody answers: it returns only when the operation ends.
+type waitingConfirmer struct{ asked chan string }
+
+func (c *waitingConfirmer) Confirm(ctx context.Context, operationID string, _ hostkey.Prompt) bool {
+	c.asked <- operationID
+	<-ctx.Done()
+	return false
+}
+
+func TestCancelEndsAnUnansweredHostKeyQuestion(t *testing.T) {
+	t.Parallel()
+	application := &fakeApplication{askHostKey: true}
+	confirm := &waitingConfirmer{asked: make(chan string, 1)}
+	service := guiapi.New(application, &eventRecorder{}, confirm)
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.Verify(context.Background(), guiapi.OperationRequest{OperationID: "verify-2", Target: device.DefaultTarget(), RootPassword: "root"})
+		done <- err
+	}()
+	select {
+	case id := <-confirm.asked:
+		if id != "verify-2" {
+			t.Fatalf("asked for %q", id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the host key was never asked")
+	}
+	if !service.Cancel("verify-2") {
+		t.Fatal("the operation was not running")
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the unanswered question outlived the cancellation")
+	}
+	if application.accepted {
+		t.Fatal("a canceled question accepted the key")
+	}
+}
 
 func TestDoctorConvertsSecretsAndEmitsOperationEvents(t *testing.T) {
 	t.Parallel()
@@ -368,5 +418,26 @@ func TestPreDispatchFailureLeavesNoHistoryAndFreesOperationID(t *testing.T) {
 	}
 	if service.Cancel("op-reused") {
 		t.Fatal("Cancel() = true after the operation completed")
+	}
+}
+
+// An operation started with WithSource keeps that source in its history entry; the desktop's own operations
+// carry none.
+func TestHistoryRecordsTheSource(t *testing.T) {
+	t.Parallel()
+	service := guiapi.New(&fakeApplication{}, nil, nil)
+	target := device.Target{Host: "192.168.31.1", WebPort: 80, SSHPort: 22}
+	if _, err := service.Doctor(guiapi.WithSource(context.Background(), guiapi.SourceAgent), guiapi.OperationRequest{OperationID: "agent-1", Target: target}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Doctor(context.Background(), guiapi.OperationRequest{OperationID: "desktop-1", Target: target}); err != nil {
+		t.Fatal(err)
+	}
+	history := service.ListReports()
+	if len(history) != 2 || history[0].OperationID != "desktop-1" || history[0].Source != "" || history[1].Source != guiapi.SourceAgent {
+		t.Fatalf("history = %+v", history)
+	}
+	if guiapi.SourceFrom(guiapi.WithSource(context.Background(), guiapi.SourceAgent)) != "agent" || guiapi.SourceFrom(context.Background()) != "" {
+		t.Fatal("SourceFrom does not read WithSource")
 	}
 }

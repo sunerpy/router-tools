@@ -8,7 +8,6 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
-	"github.com/sunerpy/router-tools/internal/app"
 	"github.com/sunerpy/router-tools/internal/wiring"
 )
 
@@ -16,11 +15,15 @@ import (
 var assets embed.FS
 
 func main() {
-	application, err := newApplicationService()
+	paths, err := wiring.DefaultPaths()
 	if err != nil {
 		log.Fatal(err)
 	}
-	desktop := NewApp(application)
+	application, err := wiring.NewService(paths)
+	if err != nil {
+		log.Fatal(err)
+	}
+	desktop := NewApp(application, paths)
 	if err := wails.Run(&options.App{
 		Title:            "Router Tools",
 		Width:            1280,
@@ -31,15 +34,8 @@ func main() {
 		AssetServer:      &assetserver.Options{Assets: assets},
 		Bind:             []any{desktop},
 		OnStartup:        desktop.startup,
+		OnShutdown:       desktop.shutdown,
 	}); err != nil {
 		log.Fatal(err)
 	}
-}
-
-func newApplicationService() (*app.Service, error) {
-	paths, err := wiring.DefaultPaths()
-	if err != nil {
-		return nil, err
-	}
-	return wiring.NewService(paths)
 }

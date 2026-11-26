@@ -10,6 +10,18 @@ An AI agent uses Router Tools through two pieces that ship in `routerctl`:
 Read the "Agent access" section of [RISKS.md](../RISKS.md) first. The binding rules are §23 of
 [rd08-protocol-spec.md](rd08-protocol-spec.md).
 
+## Desktop app
+
+The desktop app serves the same tools over Streamable HTTP, so an agent that speaks HTTP needs no `routerctl`
+binary: open 「Agent 接入」, turn on 允许 Agent 连接 and apply. The page shows the access token once (set it as
+`ROUTERCTL_MCP_TOKEN` where the agent starts), the endpoint, each HTTP host's snippet for that endpoint, and
+installs the skill. WorkBuddy documents only stdio servers, so the page gives no snippet for it: install
+`routerctl` and run `routerctl mcp config --agent workbuddy`. Writes stay off until you turn on 允许 Agent
+写入路由器 there. The settings persist across restarts; the service runs only while the app runs, and quitting
+cancels agent operations. An unknown SSH host key in an agent's run opens the app's own confirmation dialog, so
+you see the fingerprint before accepting it, unless the agent passed `accept_new_host_key` after asking you in
+chat.
+
 ## Quick start
 
 ```bash

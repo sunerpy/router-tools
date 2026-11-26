@@ -149,6 +149,105 @@ func TestEnableSSHAlreadyVerifiedDoesNotWrite(t *testing.T) {
 	}
 }
 
+// A run canceled before its first write (for example while the user decides about the router's SSH key in the
+// pre-check) ends failed and CANCELED without touching the router, so it leaves no blocking outcome.
+func TestEnableSSHCanceledBeforeTheFirstWriteDoesNotWrite(t *testing.T) {
+	t.Parallel()
+
+	for name, dialErr := range map[string]error{
+		"host-key decision canceled": device.WrapError(device.CodeCanceled, "operation canceled", context.Canceled),
+		"other pre-check failure":    &device.Error{Code: device.CodeSSHAuthFailed},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			web := &fakeWebSession{failAddAt: -1, deleteErrAt: -1}
+			prober, _ := newEnableTestProber(web, false)
+			ctx, cancel := context.WithCancel(t.Context())
+			prober.sshDial = func(context.Context, device.Target, secret.Password, hostkey.Policy) (shell.Shell, error) {
+				cancel()
+				return nil, dialErr
+			}
+			password, _ := secret.NewPassword("admin")
+			rootPassword, _ := secret.NewPassword("root-pass")
+			result, err := prober.EnableSSH(ctx, device.DefaultTarget(), password, rootPassword, hostkey.Policy{})
+			assertEnableCode(t, err, device.CodeCanceled)
+			if web.addCalls != 0 || web.deleteCalls != 0 || len(result.AttemptedMACs) != 0 || result.Status != app.StatusFailed {
+				t.Fatalf("result = %+v, writes = %d/%d", result, web.addCalls, web.deleteCalls)
+			}
+			// Nothing was checked or continued: no warning says otherwise.
+			if len(result.Warnings) != 0 {
+				t.Fatalf("warnings = %q", result.Warnings)
+			}
+		})
+	}
+}
+
+// A cancellation between two MAC commands stops before the next write is attempted.
+func TestEnableSSHCanceledBetweenWritesStopsThere(t *testing.T) {
+	t.Parallel()
+
+	web := &cancelingWebSession{fakeWebSession: fakeWebSession{failAddAt: -1, deleteErrAt: -1}}
+	prober, _ := newEnableTestProber(&web.fakeWebSession, false)
+	ctx, cancel := context.WithCancel(t.Context())
+	web.cancel = cancel
+	prober.webLogin = func(context.Context, device.Target, secret.Password) (WebSession, error) { return web, nil }
+	password, _ := secret.NewPassword("admin")
+	rootPassword, _ := secret.NewPassword("root-pass")
+	result, err := prober.EnableSSH(ctx, device.DefaultTarget(), password, rootPassword, hostkey.Policy{})
+	assertEnableCode(t, err, device.CodeCanceled)
+	if web.addCalls != 1 || len(result.AttemptedMACs) != 1 || result.AcceptedSteps != 1 || result.Status != app.StatusPartial {
+		t.Fatalf("result = %+v, adds = %d", result, web.addCalls)
+	}
+	// Spec §16.5: the temporary rule is still removed after the cancellation, bounded by the request timeouts.
+	if web.deleteCalls != 1 || web.canceledDeletes != 0 || len(result.Cleanup) != 1 || !result.Cleanup[0].Success {
+		t.Fatalf("cleanup = %+v, deletes = %d (%d with a canceled context)", result.Cleanup, web.deleteCalls, web.canceledDeletes)
+	}
+}
+
+// A cancellation after the last command was accepted skips the final SSH checks (spec §16.5: stop the following
+// steps) and keeps partial, since the commands reached the router.
+func TestEnableSSHCanceledAfterTheWritesSkipsTheFinalCheck(t *testing.T) {
+	t.Parallel()
+
+	web := &fakeWebSession{failAddAt: -1, deleteErrAt: -1}
+	prober, calls := newEnableTestProber(web, false)
+	ctx, cancel := context.WithCancel(t.Context())
+	prober.sleep = func(time.Duration) { cancel() } // the fixed wait after the last command
+	password, _ := secret.NewPassword("admin")
+	rootPassword, _ := secret.NewPassword("root-pass")
+	result, err := prober.EnableSSH(ctx, device.DefaultTarget(), password, rootPassword, hostkey.Policy{})
+	assertEnableCode(t, err, device.CodeCanceled)
+	if result.Status != app.StatusPartial || result.AcceptedSteps != 3 || *calls != 1 || len(result.Cleanup) != 3 {
+		t.Fatalf("result = %+v, SSH dials = %d", result, *calls)
+	}
+}
+
+// cancelingWebSession cancels the run once its first MAC command was accepted and fails like the Web client
+// when it is used with a canceled context.
+type cancelingWebSession struct {
+	fakeWebSession
+	cancel          context.CancelFunc
+	canceledDeletes int
+}
+
+func (s *cancelingWebSession) AddMACRule(ctx context.Context, mac, command string) error {
+	if ctx.Err() != nil {
+		return &device.Error{Code: device.CodeRemoteResultUnknown, Message: "MAC add result is unknown"}
+	}
+	err := s.fakeWebSession.AddMACRule(ctx, mac, command)
+	s.cancel()
+	return err
+}
+
+func (s *cancelingWebSession) DeleteMACRule(ctx context.Context, mac string) error {
+	if ctx.Err() != nil {
+		s.canceledDeletes++
+		s.deleteCalls++
+		return &device.Error{Code: device.CodeRemoteResultUnknown, Message: "MAC delete result is unknown"}
+	}
+	return s.fakeWebSession.DeleteMACRule(ctx, mac)
+}
+
 func newEnableTestProber(web *fakeWebSession, already bool) (*Prober, *int) {
 	prober := NewProber(nil)
 	prober.webLogin = func(context.Context, device.Target, secret.Password) (WebSession, error) { return web, nil }

@@ -175,7 +175,7 @@ Read `RISKS.md` and `RECOVERY.md` first. The acknowledgement is the resolved pro
 
 ## Agent access (MCP)
 
-`routerctl mcp` serves the Model Context Protocol so an AI agent can run detection, backups and guided setup. Read the "Agent access" section of `RISKS.md` first; the binding rules are in §23 of `docs/rd08-protocol-spec.md`.
+`routerctl mcp` serves the Model Context Protocol so an AI agent can run detection, backups and guided setup. Read the "Agent access" section of `RISKS.md` first; the binding rules are in §23 of `docs/rd08-protocol-spec.md`. The desktop app offers the same server over Streamable HTTP on its 「Agent 接入」 page (see [agents.md](agents.md#desktop-app)).
 
 ```bash
 # stdio: the agent host starts this command itself

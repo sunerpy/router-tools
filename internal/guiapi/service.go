@@ -45,9 +45,10 @@ type EventEmitter interface {
 	Emit(operationID string, event app.Event)
 }
 
-// Confirmer handles unknown public host keys without hiding fingerprints.
+// Confirmer handles unknown public host keys without hiding fingerprints. ctx is the operation's context: a
+// question still open when the operation is canceled or ends is answered no.
 type Confirmer interface {
-	Confirm(operationID string, prompt hostkey.Prompt) bool
+	Confirm(ctx context.Context, operationID string, prompt hostkey.Prompt) bool
 }
 
 // HostKeyRequest contains only public host-key preferences.
@@ -122,6 +123,24 @@ type HistoryEntry struct {
 	Operation   string    `json:"operation"`
 	Report      any       `json:"report"`
 	Time        time.Time `json:"time"`
+	// Source names who started the operation: empty for the desktop window, SourceAgent for an agent.
+	Source string `json:"source,omitempty"`
+}
+
+// SourceAgent marks operations an agent started through the MCP server.
+const SourceAgent = "agent"
+
+type sourceKey struct{}
+
+// WithSource marks the operations started with ctx as coming from source.
+func WithSource(ctx context.Context, source string) context.Context {
+	return context.WithValue(ctx, sourceKey{}, source)
+}
+
+// SourceFrom returns the source WithSource set, or "".
+func SourceFrom(ctx context.Context) string {
+	source, _ := ctx.Value(sourceKey{}).(string)
+	return source
 }
 
 // Service owns cancellation and operation-scoped event/history state.
@@ -137,13 +156,19 @@ type Service struct {
 	emitter     EventEmitter
 	confirmer   Confirmer
 	mu          sync.Mutex
-	operations  map[string]context.CancelFunc
+	operations  map[string]activeOperation
 	history     []HistoryEntry
+}
+
+type activeOperation struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+	source string
 }
 
 // New constructs a desktop service.
 func New(application Application, emitter EventEmitter, confirmer Confirmer) *Service {
-	return &Service{application: application, emitter: emitter, confirmer: confirmer, operations: make(map[string]context.CancelFunc)}
+	return &Service{application: application, emitter: emitter, confirmer: confirmer, operations: make(map[string]activeOperation)}
 }
 
 // OperationRequest helpers.
@@ -460,10 +485,10 @@ func (s *Service) Catalog() []device.CatalogEntry {
 // Cancel requests cancellation of an active operation.
 func (s *Service) Cancel(operationID string) bool {
 	s.mu.Lock()
-	cancel, ok := s.operations[operationID]
+	active, ok := s.operations[operationID]
 	s.mu.Unlock()
 	if ok {
-		cancel()
+		active.cancel()
 	}
 	return ok
 }
@@ -487,7 +512,7 @@ func (s *Service) start(parent context.Context, operationID string) (context.Con
 		return nil, nil, fmt.Errorf("operation ID %q is already active", operationID)
 	}
 	ctx, cancel := context.WithCancel(parent)
-	s.operations[operationID] = cancel
+	s.operations[operationID] = activeOperation{ctx: ctx, cancel: cancel, source: SourceFrom(parent)}
 	finish := func() {
 		s.mu.Lock()
 		delete(s.operations, operationID)
@@ -524,7 +549,8 @@ func resolution(status string, err error) error {
 func (s *Service) record(operationID, operation string, report any) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.history = append([]HistoryEntry{{OperationID: operationID, Operation: operation, Report: report, Time: time.Now().UTC()}}, s.history...)
+	entry := HistoryEntry{OperationID: operationID, Operation: operation, Report: report, Time: time.Now().UTC(), Source: s.operations[operationID].source}
+	s.history = append([]HistoryEntry{entry}, s.history...)
 	if len(s.history) > 50 {
 		s.history = s.history[:50]
 	}
@@ -552,10 +578,20 @@ func (s *Service) policy(operationID string, request HostKeyRequest) hostkey.Pol
 	policy := hostkey.Policy{KnownHostsPath: path, PinSHA256: request.PinSHA256, AcceptNew: request.AcceptNew}
 	if s.confirmer != nil {
 		policy.Confirm = func(prompt hostkey.Prompt) bool {
-			return s.confirmer.Confirm(operationID, prompt)
+			return s.confirmer.Confirm(s.operationContext(operationID), operationID, prompt)
 		}
 	}
 	return policy
+}
+
+// operationContext is the context of a running operation, so a host-key question ends with it.
+func (s *Service) operationContext(operationID string) context.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if active, ok := s.operations[operationID]; ok {
+		return active.ctx
+	}
+	return context.Background()
 }
 
 // NewOperationID returns a random frontend-safe operation ID.

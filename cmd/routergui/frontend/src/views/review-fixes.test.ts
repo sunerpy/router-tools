@@ -42,6 +42,14 @@ function makeAPI(): RouterAPI {
     ResolveHostKey: vi.fn(),
     OnProgress: vi.fn().mockReturnValue(() => {}),
     OnHostKey: vi.fn().mockReturnValue(() => {}),
+    OnHostKeyExpired: vi.fn().mockReturnValue(() => {}),
+    AgentStatus: vi.fn(),
+    AgentApply: vi.fn(),
+    AgentNewToken: vi.fn(),
+    AgentSetup: vi.fn(),
+    AgentInstallSkill: vi.fn(),
+    AgentCancel: vi.fn().mockResolvedValue(true),
+    OnAgentStatus: vi.fn().mockReturnValue(() => {}),
   };
 }
 

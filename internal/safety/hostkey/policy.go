@@ -2,12 +2,14 @@
 package hostkey
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/knownhosts"
@@ -53,6 +55,10 @@ func (p Policy) Callback(_ context.Context) (ssh.HostKeyCallback, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load known_hosts: %w", err)
 	}
+	// knownhosts.New read the file once, but every key exchange on the connection calls the callback again:
+	// remember the keys accepted here, so a rekey neither asks again nor stores a second line.
+	var mu sync.Mutex
+	accepted := map[string][]byte{}
 
 	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 		fingerprint := ssh.FingerprintSHA256(key)
@@ -65,6 +71,16 @@ func (p Policy) Callback(_ context.Context) (ssh.HostKeyCallback, error) {
 		err := trusted(hostname, remote, key)
 		if err == nil {
 			return nil
+		}
+		host := knownhosts.Normalize(hostname)
+		mu.Lock()
+		earlier, known := accepted[host]
+		mu.Unlock()
+		if known {
+			if bytes.Equal(earlier, key.Marshal()) {
+				return nil
+			}
+			return &device.Error{Code: device.CodeHostKeyMismatch, Message: "SSH host key changed; refusing to replace the stored key"}
 		}
 		var keyError *knownhosts.KeyError
 		if !errors.As(err, &keyError) {
@@ -83,6 +99,9 @@ func (p Policy) Callback(_ context.Context) (ssh.HostKeyCallback, error) {
 		if err := appendKey(p.KnownHostsPath, hostname, key); err != nil {
 			return fmt.Errorf("store SSH host key: %w", err)
 		}
+		mu.Lock()
+		accepted[host] = key.Marshal()
+		mu.Unlock()
 		return nil
 	}, nil
 }

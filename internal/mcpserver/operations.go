@@ -10,6 +10,7 @@ import (
 
 	"github.com/sunerpy/router-tools/internal/app"
 	"github.com/sunerpy/router-tools/internal/device"
+	"github.com/sunerpy/router-tools/internal/guiapi"
 	"github.com/sunerpy/router-tools/internal/secret"
 )
 
@@ -34,6 +35,7 @@ type Operations struct {
 	closed   bool
 	now      func() time.Time
 	onFinish func(*operation, outcome)
+	onChange func()
 }
 
 // OperationSummary describes one agent operation without its report.
@@ -107,7 +109,7 @@ func (o *Operations) start(base context.Context, tool, host string, redactor *se
 	if err != nil {
 		return nil, &device.Error{Code: device.CodeInternalError, Message: "cannot create an operation ID"}
 	}
-	ctx, cancel := context.WithCancel(base)
+	ctx, cancel := context.WithCancel(guiapi.WithSource(base, guiapi.SourceAgent))
 	o.mu.Lock()
 	if o.closed {
 		o.mu.Unlock()
@@ -125,7 +127,11 @@ func (o *Operations) start(base context.Context, tool, host string, redactor *se
 	}
 	o.byID[id] = op
 	o.running++
+	changed := o.onChange
 	o.mu.Unlock()
+	if changed != nil {
+		changed()
+	}
 	go func() {
 		o.finish(op, runSafely(ctx, id, run))
 	}()
@@ -160,13 +166,39 @@ func (o *Operations) finish(op *operation, result outcome) {
 		delete(o.byID, o.finished[0])
 		o.finished = o.finished[1:]
 	}
-	hook := o.onFinish
+	hook, changed := o.onFinish, o.onChange
 	op.cancel()
 	o.mu.Unlock()
 	if hook != nil {
 		hook(op, result)
 	}
 	close(op.done)
+	if changed != nil {
+		changed()
+	}
+}
+
+// OnChange registers a function called after an operation starts and after one ends.
+func (o *Operations) OnChange(changed func()) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.onChange = changed
+}
+
+// Cancel requests the cancellation of a running operation this registry started; it reports false for unknown
+// and finished operations. A canceled write keeps its partial or unknown result (spec §16.5).
+func (o *Operations) Cancel(operationID string) bool {
+	op, ok := o.get(operationID)
+	if !ok {
+		return false
+	}
+	select {
+	case <-op.done:
+		return false
+	default:
+		op.cancel()
+		return true
+	}
 }
 
 // Emit records progress for an operation this registry started; other IDs are ignored.

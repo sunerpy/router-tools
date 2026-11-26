@@ -9,6 +9,7 @@ import AppIconButton from "../components/AppIconButton.vue";
 import AppSegmented from "../components/AppSegmented.vue";
 import AppStepper from "../components/AppStepper.vue";
 import AppToggle from "../components/AppToggle.vue";
+import CodeBlock from "../components/CodeBlock.vue";
 import ConfirmDialog from "../components/ConfirmDialog.vue";
 import CredentialState from "../components/CredentialState.vue";
 import DeviceSelector from "../components/DeviceSelector.vue";
@@ -105,7 +106,19 @@ const events = [
   { stage: "CRASH_WRITE_TIMEOUT", status: "unknown" },
   { stage: "failed", status: "failed" },
 ];
+const snippet = `[mcp_servers.router-tools]
+url = "http://127.0.0.1:18731/mcp"
+bearer_token_env_var = "ROUTERCTL_MCP_TOKEN"
+# ${"an-unbroken-identifier-".repeat(6)}`;
 const rows = [
+  {
+    id: "a1",
+    operation: "guide_apply",
+    title: "执行引导计划",
+    meta: "14:40:12 · 192.168.31.1",
+    status: "running",
+    agent: true,
+  },
   {
     id: "d1",
     operation: "doctor",
@@ -307,6 +320,7 @@ const rows = [
       <div class="stack">
         <OperationProgress status="unknown" :events="events" />
         <ReportViewer :report="report" />
+        <CodeBlock label="配置片段" :content="snippet" />
       </div>
     </AppCard>
 

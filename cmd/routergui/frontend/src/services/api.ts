@@ -46,6 +46,8 @@ export interface HostKeyPrompt {
   address: string;
   algorithm: string;
   fingerprint: string;
+  /** "agent" when an agent started the operation. */
+  source?: string;
 }
 
 /** Deep-persistence safety parameters of one profile (device.DeepPolicy). */
@@ -340,6 +342,105 @@ export interface HistoryEntry {
   operation: string;
   report: unknown;
   time: string;
+  /** "agent" when an agent started the operation; absent for the window's own runs. */
+  source?: string;
+}
+
+/** What the agent page sets (mcpserver.SettingsChange); the token changes only through AgentNewToken. */
+export interface AgentSettingsChange {
+  enabled: boolean;
+  listen_host: string;
+  port: number;
+  allow_writes: boolean;
+}
+
+/** What actually listens, next to the stored settings (mcpserver.ListenerStatus). */
+export interface AgentListenerStatus extends AgentSettingsChange {
+  listening: boolean;
+  /** The bound host:port while listening. */
+  address?: string;
+  token_set: boolean;
+  token_created_at?: string;
+  last_error?: string;
+}
+
+/** One agent operation (mcpserver.OperationSummary). */
+export interface AgentOperation {
+  operation_id: string;
+  tool: string;
+  host?: string;
+  status: string;
+  done: boolean;
+  started: string;
+  ended?: string;
+  error_code?: string;
+}
+
+/** One secret-free audit record of an agent call (mcpserver.AuditRecord). */
+export interface AgentActivity {
+  time: string;
+  kind: "call" | "finish";
+  tool: string;
+  operation_id?: string;
+  host?: string;
+  status?: string;
+  error_code?: string;
+  duration_ms: number;
+  done: boolean;
+}
+
+/** A documented agent host (agentsetup.Agent). */
+export interface AgentHost {
+  id: string;
+  name: string;
+  http: boolean;
+  skill_dir?: string;
+  docs?: string;
+}
+
+/** The desktop's agent access (agentaccess.Status). */
+export interface AgentStatus {
+  listener: AgentListenerStatus;
+  /** The endpoint local agents use. */
+  url: string;
+  local_addresses: string[] | null;
+  operations: AgentOperation[] | null;
+  activity: AgentActivity[] | null;
+  agents: AgentHost[] | null;
+  /** Where 安装 Skill writes for each host with a skills directory, resolved by Go. */
+  skill_paths?: Record<string, string>;
+}
+
+/** AgentApply's result: a token created by enabling without one is returned once. */
+export interface AgentApplyResult {
+  status: AgentListenerStatus;
+  token?: string;
+}
+
+/** One host's configuration for the desktop's endpoint (agentsetup.Setup). */
+export interface AgentSetup {
+  agent: string;
+  transport: string;
+  file?: string;
+  format: string;
+  snippet: string;
+  command?: string;
+  notes?: string[] | null;
+}
+
+/** Install the skill for a host (agent) or into a directory the user picked (dir). */
+export interface SkillRequest {
+  agent?: string;
+  dir?: string;
+  force?: boolean;
+}
+
+/** installed, unchanged or updated; differs (ask before force), refused or failed with a message. */
+export interface SkillReport {
+  status: "installed" | "unchanged" | "updated" | "differs" | "refused" | "failed";
+  path: string;
+  files?: string[] | null;
+  message?: string;
 }
 
 export interface RouterAPI {
@@ -368,6 +469,18 @@ export interface RouterAPI {
   ResolveHostKey(promptID: string, accept: boolean): void;
   OnProgress(callback: (payload: ProgressPayload) => void): () => void;
   OnHostKey(callback: (prompt: HostKeyPrompt) => void): () => void;
+  /** Go stopped waiting for a prompt (two minutes passed, or its operation was canceled or ended) and refused the key. */
+  OnHostKeyExpired(callback: (promptID: string) => void): () => void;
+  AgentStatus(): Promise<AgentStatus>;
+  /** Rejects with the reason when the change cannot be applied; the listener then keeps its state. */
+  AgentApply(change: AgentSettingsChange): Promise<AgentApplyResult>;
+  /** Replaces the access token and resolves it once. */
+  AgentNewToken(): Promise<string>;
+  /** Rejects for hosts without a Streamable HTTP setup (WorkBuddy). */
+  AgentSetup(agent: string): Promise<AgentSetup>;
+  AgentInstallSkill(request: SkillRequest): Promise<SkillReport>;
+  AgentCancel(operationID: string): Promise<boolean>;
+  OnAgentStatus(callback: (status: AgentStatus) => void): () => void;
 }
 
 export type OperationName =

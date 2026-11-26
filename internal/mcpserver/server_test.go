@@ -817,3 +817,14 @@ func TestSkillNamesEveryTool(t *testing.T) {
 		}
 	}
 }
+
+// Operations started by agents carry the agent source, so the desktop's history marks them.
+func TestOperationsCarryTheAgentSource(t *testing.T) {
+	t.Parallel()
+	backend := newFakeBackend()
+	h := newHarness(t, backend, false)
+	result := h.call("backup_create", map[string]any{"target": target("192.168.31.1"), "wait_seconds": 5})
+	if !result.Done || backend.source(result.OperationID) != guiapi.SourceAgent {
+		t.Fatalf("result = %+v, source = %q", result, backend.source(result.OperationID))
+	}
+}

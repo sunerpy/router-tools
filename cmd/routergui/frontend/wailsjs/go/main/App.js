@@ -6,6 +6,30 @@ export function AcknowledgeRecovery(arg1) {
   return window['go']['main']['App']['AcknowledgeRecovery'](arg1);
 }
 
+export function AgentApply(arg1) {
+  return window['go']['main']['App']['AgentApply'](arg1);
+}
+
+export function AgentCancel(arg1) {
+  return window['go']['main']['App']['AgentCancel'](arg1);
+}
+
+export function AgentInstallSkill(arg1) {
+  return window['go']['main']['App']['AgentInstallSkill'](arg1);
+}
+
+export function AgentNewToken() {
+  return window['go']['main']['App']['AgentNewToken']();
+}
+
+export function AgentSetup(arg1) {
+  return window['go']['main']['App']['AgentSetup'](arg1);
+}
+
+export function AgentStatus() {
+  return window['go']['main']['App']['AgentStatus']();
+}
+
 export function BackupCreate(arg1) {
   return window['go']['main']['App']['BackupCreate'](arg1);
 }
