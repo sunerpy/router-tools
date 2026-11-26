@@ -26,6 +26,10 @@ export function Catalog() {
   return window['go']['main']['App']['Catalog']();
 }
 
+export function CredentialStatus() {
+  return window['go']['main']['App']['CredentialStatus']();
+}
+
 export function DeepPersist(arg1) {
   return window['go']['main']['App']['DeepPersist'](arg1);
 }
@@ -36,6 +40,14 @@ export function Doctor(arg1) {
 
 export function EnableSSH(arg1) {
   return window['go']['main']['App']['EnableSSH'](arg1);
+}
+
+export function ForgetAllCredentials() {
+  return window['go']['main']['App']['ForgetAllCredentials']();
+}
+
+export function ForgetCredential(arg1) {
+  return window['go']['main']['App']['ForgetCredential'](arg1);
 }
 
 export function GuideApply(arg1) {

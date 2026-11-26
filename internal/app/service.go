@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 	"github.com/sunerpy/router-tools/internal/secret"
@@ -54,6 +55,7 @@ type Service struct {
 	discovery   device.Prober
 	locker      OperationLocker
 	outcomes    OutcomeStore
+	credentials credentials.Store
 	clock       func() time.Time
 	backupRoot  string
 	journalRoot string
@@ -71,10 +73,12 @@ func NewServiceWithLocker(registry *device.Registry, prober device.Prober, locke
 }
 
 // Options carries the production stores and managed directories. A nil Outcomes store disables the
-// recovery guard and is meant for tests only; both mains always pass one.
+// recovery guard and is meant for tests only; both mains always pass one. A nil Credentials store means no
+// password is ever saved or filled.
 type Options struct {
 	Locker      OperationLocker
 	Outcomes    OutcomeStore
+	Credentials credentials.Store
 	BackupRoot  string
 	JournalRoot string
 	Clock       func() time.Time
@@ -93,7 +97,7 @@ func NewServiceWithOptions(registry *device.Registry, prober device.Prober, opti
 	}
 	return &Service{
 		registry: registry, discovery: prober, locker: options.Locker, outcomes: options.Outcomes,
-		clock: options.Clock, backupRoot: options.BackupRoot, journalRoot: options.JournalRoot,
+		credentials: options.Credentials, clock: options.Clock, backupRoot: options.BackupRoot, journalRoot: options.JournalRoot,
 	}, nil
 }
 
@@ -124,6 +128,7 @@ type DoctorRequest struct {
 	Transport      string
 	AllowTelnet    bool
 	HostKeyPolicy  hostkey.Policy
+	Credentials    CredentialUse
 }
 
 // DoctorReport is the stable result rendered by CLI and future GUI clients.
@@ -145,6 +150,7 @@ type DoctorReport struct {
 	TelnetRootVerified bool                  `json:"telnet_root_verified"`
 	BootID             string                `json:"boot_id,omitempty"`
 	NextSteps          []string              `json:"next_steps,omitempty"`
+	Credentials        []CredentialNote      `json:"credentials,omitempty"`
 	Error              *device.Error         `json:"error,omitempty"`
 }
 
@@ -179,25 +185,27 @@ func (s *Service) Doctor(ctx context.Context, request DoctorRequest, events Even
 		}
 		report.Transport = request.Transport
 	}
+	redactor := secret.NewRedactor()
+	if request.WithAdminAuth {
+		redactor.Add(request.AdminPassword.Expose())
+	}
+	if request.WithRootVerify {
+		redactor.Add(request.RootPassword.Expose())
+	}
+	var creds *credentialSession
 	fail := func(err error) (DoctorReport, error) {
 		normalized := normalizeError(err)
-		redactor := secret.NewRedactor()
-		if request.WithAdminAuth {
-			redactor.Add(request.AdminPassword.Expose())
-			if report.AdminAuth != CheckVerified {
-				report.AdminAuth = CheckFailed
-			}
+		if request.WithAdminAuth && report.AdminAuth != CheckVerified {
+			report.AdminAuth = CheckFailed
 		}
-		if request.WithRootVerify {
-			redactor.Add(request.RootPassword.Expose())
-			if report.RootVerify != CheckVerified {
-				report.RootVerify = CheckFailed
-			}
+		if request.WithRootVerify && report.RootVerify != CheckVerified {
+			report.RootVerify = CheckFailed
 		}
 		redacted := *normalized
 		redacted.Message = redactor.Text(redacted.Message)
 		report.Status = StatusFailed
 		report.Error = &redacted
+		report.Credentials = creds.report()
 		emit("failed", StatusFailed)
 		return report, &redacted
 	}
@@ -210,12 +218,12 @@ func (s *Service) Doctor(ctx context.Context, request DoctorRequest, events Even
 		return fail(err)
 	}
 	if request.WithAdminAuth {
-		if err := request.AdminPassword.Validate(); err != nil {
+		if err := checkTypedPassword(request.AdminPassword, request.Credentials); err != nil {
 			return fail(err)
 		}
 	}
 	if request.WithRootVerify {
-		if err := request.RootPassword.Validate(); err != nil {
+		if err := checkTypedPassword(request.RootPassword, request.Credentials); err != nil {
 			return fail(err)
 		}
 		if request.Transport == "telnet" && !request.AllowTelnet {
@@ -239,6 +247,7 @@ func (s *Service) Doctor(ctx context.Context, request DoctorRequest, events Even
 	}
 	report.Profile = adapter.Profile()
 	report.Compatible = true
+	creds = s.credentialSession(request.Credentials, request.Target, report.Profile, redactor)
 	if request.WithAdminAuth {
 		emit("admin_auth", "running")
 		if !report.Profile.Supports(device.CapabilityWebAuth) {
@@ -248,10 +257,16 @@ func (s *Service) Doctor(ctx context.Context, request DoctorRequest, events Even
 		if !ok {
 			return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected prober does not support Web authentication"})
 		}
-		if err := verifier.VerifyAdmin(ctx, request.Target, request.AdminPassword); err != nil {
+		admin, err := creds.admin(request.AdminPassword)
+		if err != nil {
+			return fail(err)
+		}
+		if err := verifier.VerifyAdmin(ctx, request.Target, admin); err != nil {
+			creds.observe(err)
 			return fail(err)
 		}
 		report.AdminAuth = CheckVerified
+		creds.remember(credentials.KindWebAdmin)
 	}
 	if request.WithRootVerify {
 		emit("root_verify", "running")
@@ -262,8 +277,13 @@ func (s *Service) Doctor(ctx context.Context, request DoctorRequest, events Even
 		if !ok {
 			return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "root verification is unavailable"})
 		}
-		result, err := verifier.VerifyRoot(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, request.Transport, request.AllowTelnet)
+		root, err := creds.root(request.RootPassword, request.AllowTelnet)
 		if err != nil {
+			return fail(err)
+		}
+		result, err := verifier.VerifyRoot(ctx, request.Target, root, creds.hostKeys(request.HostKeyPolicy), request.Transport, request.AllowTelnet)
+		if err != nil {
+			creds.observe(err)
 			return fail(err)
 		}
 		report.RootVerify = CheckVerified
@@ -271,7 +291,11 @@ func (s *Service) Doctor(ctx context.Context, request DoctorRequest, events Even
 		report.SSHVerified = result.RootVerified && result.Transport == "ssh"
 		report.TelnetRootVerified = result.RootVerified && result.Transport == "telnet"
 		report.BootID = result.BootID
+		if report.SSHVerified {
+			creds.remember(credentials.KindRoot)
+		}
 	}
+	report.Credentials = creds.report()
 	report.Status = StatusSucceeded
 	report.NextSteps = []string{
 		"Port state is connectivity evidence only; verify root authentication before treating SSH as available",

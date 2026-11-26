@@ -13,6 +13,7 @@ import (
 
 	"github.com/sunerpy/router-tools/internal/app"
 	"github.com/sunerpy/router-tools/internal/buildinfo"
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 	"github.com/sunerpy/router-tools/internal/secret"
@@ -55,6 +56,54 @@ type operationOptions struct {
 	yes                *bool
 	ackDeep            *string
 	runDir             *string
+	useSaved           *bool
+	remember           *bool
+}
+
+// credentialUse is the saved-password choice of this run.
+func (o *operationOptions) credentialUse() app.CredentialUse {
+	return app.CredentialUse{UseSaved: *o.useSaved, Remember: *o.remember, Redactor: o.redactor}
+}
+
+// leaveToVault reports whether a password stays empty for the application to fill from the vault: saved
+// passwords were requested, the password is not piped on stdin, and either no prompt is possible or a
+// usable saved entry exists for this kind, host and port. The application still decides after resolving
+// the profile and reports CREDENTIAL_NOT_FOUND before any device write.
+func (o *operationOptions) leaveToVault(kind credentials.Kind, port int, fromStdin bool) bool {
+	if !*o.useSaved || fromStdin {
+		return false
+	}
+	if *o.nonInteractive {
+		return true
+	}
+	service, ok := o.service.(CredentialService)
+	if !ok {
+		return false
+	}
+	list, err := service.ListCredentials()
+	if err != nil {
+		return false
+	}
+	host := device.CanonicalHost(o.target.Host)
+	for _, entry := range list.Entries {
+		if entry.Kind == kind && entry.Host == host && entry.Port == port && !entry.Rejected() {
+			return true
+		}
+	}
+	return false
+}
+
+// adminPassword reads the Web admin password unless the vault provides it.
+func (o *operationOptions) adminPassword(cmd *cobra.Command) (secret.Password, error) {
+	if o.leaveToVault(credentials.KindWebAdmin, o.target.WebPort, *o.adminPasswordStdin) {
+		return secret.Password{}, nil
+	}
+	password, err := readAdminPassword(o.stdin, cmd.ErrOrStderr(), *o.adminPasswordStdin, *o.nonInteractive)
+	if err != nil {
+		return secret.Password{}, &ExitError{Code: exitCode(err), Err: err}
+	}
+	o.redactor.Add(password.Expose())
+	return password, nil
 }
 
 func addOperationCommands(root *cobra.Command, options *operationOptions) {
@@ -65,12 +114,12 @@ func addOperationCommands(root *cobra.Command, options *operationOptions) {
 			if !ok {
 				return &ExitError{Code: 12, Err: fmt.Errorf("enable service is not configured")}
 			}
-			admin, err := readAdminPassword(options.stdin, cmd.ErrOrStderr(), *options.adminPasswordStdin, *options.nonInteractive)
+			admin, err := options.adminPassword(cmd)
 			if err != nil {
-				return &ExitError{Code: exitCode(err), Err: err}
+				return err
 			}
-			options.redactor.Add(admin.Expose())
-			rootPassword, err := options.rootPassword(cmd)
+			// The root password the enable flow sets is always typed, never filled from the vault.
+			rootPassword, err := options.typedRootPassword(cmd)
 			if err != nil {
 				return err
 			}
@@ -81,7 +130,7 @@ func addOperationCommands(root *cobra.Command, options *operationOptions) {
 			report, err := service.EnableSSH(cmd.Context(), app.EnableRequest{
 				Target: *options.target, ProfileID: *options.profileID,
 				AdminPassword: admin, RootPassword: rootPassword,
-				HostKeyPolicy: options.hostPolicy(cmd), Confirmed: confirmed,
+				HostKeyPolicy: options.hostPolicy(cmd), Confirmed: confirmed, Credentials: options.credentialUse(),
 			}, options.events(cmd))
 			return options.finish(cmd, report, err)
 		},
@@ -120,6 +169,7 @@ func addOperationCommands(root *cobra.Command, options *operationOptions) {
 			report, err := service.RebootVerify(cmd.Context(), app.SoftRequest{
 				Target: *options.target, ProfileID: *options.profileID, RootPassword: rootPassword,
 				HostKeyPolicy: options.hostPolicy(cmd), AllowTelnet: *options.allowTelnet, Confirmed: confirmed,
+				Credentials: options.credentialUse(),
 			}, options.events(cmd))
 			return options.finish(cmd, report, err)
 		},
@@ -141,6 +191,7 @@ func addOperationCommands(root *cobra.Command, options *operationOptions) {
 			report, err := service.BackupCreate(cmd.Context(), app.BackupCreateRequest{
 				Target: *options.target, ProfileID: *options.profileID, RootPassword: rootPassword,
 				HostKeyPolicy: options.hostPolicy(cmd), OutputDir: output, ToolVersion: options.info.Version,
+				Credentials: options.credentialUse(),
 			}, options.events(cmd))
 			return options.finish(cmd, report, err)
 		},
@@ -169,6 +220,7 @@ func addOperationCommands(root *cobra.Command, options *operationOptions) {
 					BackupCreateRequest: app.BackupCreateRequest{
 						Target: *options.target, ProfileID: *options.profileID,
 						RootPassword: rootPassword, HostKeyPolicy: options.hostPolicy(cmd),
+						Credentials: options.credentialUse(),
 					},
 					BackupDir: directory,
 				}, options.events(cmd))
@@ -190,7 +242,11 @@ func addOperationCommands(root *cobra.Command, options *operationOptions) {
 			if !ok {
 				return &ExitError{Code: 12, Err: fmt.Errorf("deep-persist service is not configured")}
 			}
-			rootPassword, err := options.rootPassword(cmd)
+			if *options.useSaved || *options.remember {
+				refused := &device.Error{Code: device.CodeInvalidArgument, Message: "deep persistence never uses or saves stored passwords; type the root password without --use-saved-password or --remember-password"}
+				return &ExitError{Code: exitCode(refused), Err: refused}
+			}
+			rootPassword, err := options.typedRootPassword(cmd)
 			if err != nil {
 				return err
 			}
@@ -240,6 +296,7 @@ func (o *operationOptions) runSoft(cmd *cobra.Command, remove bool) error {
 	request := app.SoftRequest{
 		Target: *o.target, ProfileID: *o.profileID, RootPassword: rootPassword,
 		HostKeyPolicy: o.hostPolicy(cmd), AllowTelnet: *o.allowTelnet, Confirmed: confirmed,
+		Credentials: o.credentialUse(),
 	}
 	if remove {
 		report, err := service.PersistRemove(cmd.Context(), request, o.events(cmd))
@@ -249,7 +306,21 @@ func (o *operationOptions) runSoft(cmd *cobra.Command, remove bool) error {
 	return o.finish(cmd, report, err)
 }
 
+// rootPassword reads the root password unless the vault provides it.
 func (o *operationOptions) rootPassword(cmd *cobra.Command) (secret.Password, error) {
+	// A saved root password is never sent over Telnet: interactive Telnet-capable runs ask for it, and
+	// non-interactive ones leave it empty so the application reports why it cannot be used.
+	if *o.allowTelnet && !*o.nonInteractive {
+		return o.typedRootPassword(cmd)
+	}
+	if o.leaveToVault(credentials.KindRoot, o.target.SSHPort, *o.rootPasswordStdin) {
+		return secret.Password{}, nil
+	}
+	return o.typedRootPassword(cmd)
+}
+
+// typedRootPassword always reads the root password from stdin or a prompt.
+func (o *operationOptions) typedRootPassword(cmd *cobra.Command) (secret.Password, error) {
 	password, err := readRootPassword(o.stdin, cmd.ErrOrStderr(), *o.rootPasswordStdin, *o.nonInteractive)
 	if err != nil {
 		return secret.Password{}, &ExitError{Code: exitCode(err), Err: err}
@@ -400,16 +471,25 @@ func renderOperationHuman(writer io.Writer, report any) error {
 				}
 			}
 		}
+		if err := renderCredentialNotes(writer, value.Credentials); err != nil {
+			return err
+		}
 		return renderOperationError(writer, value.Error)
 	case app.SoftReport:
 		_, err := fmt.Fprintf(writer, "Status: %s\nOutcome: %s\nVerified: %t\nReboot verified: %t\n", value.Status, value.Result.Outcome, value.Result.Verified, value.Result.RebootVerified)
 		if err != nil {
 			return err
 		}
+		if err := renderCredentialNotes(writer, value.Credentials); err != nil {
+			return err
+		}
 		return renderOperationError(writer, value.Error)
 	case app.RebootReport:
 		_, err := fmt.Fprintf(writer, "Status: %s\nOld boot ID: %s\nNew boot ID: %s\nSSH verified: %t\nSoft verified: %t\n", value.Status, value.Result.OldBootID, value.Result.NewBootID, value.Result.SSHVerified, value.Result.SoftVerified)
 		if err != nil {
+			return err
+		}
+		if err := renderCredentialNotes(writer, value.Credentials); err != nil {
 			return err
 		}
 		return renderOperationError(writer, value.Error)
@@ -422,10 +502,16 @@ func renderOperationHuman(writer io.Writer, report any) error {
 		if err != nil {
 			return err
 		}
+		if err := renderCredentialNotes(writer, value.Credentials); err != nil {
+			return err
+		}
 		return renderOperationError(writer, value.Error)
 	case app.BackupVerifyReport:
 		_, err := fmt.Fprintf(writer, "Status: %s\nBackup directory: %s\nValid: %t\n", value.Status, value.Directory, value.Valid)
 		if err != nil {
+			return err
+		}
+		if err := renderCredentialNotes(writer, value.Credentials); err != nil {
 			return err
 		}
 		return renderOperationError(writer, value.Error)

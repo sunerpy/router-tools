@@ -26,6 +26,8 @@ Unknown firmware is never treated as compatible merely because the hardware stri
 
 `secret.Password` validates exact UTF-8 input without trimming or normalization. `Expose()` is used only at protocol boundaries. `secret.Redactor` covers raw/Base64/URL representations and structured `stok/token/key/nonce` fields. Application failures are copied and redacted before report serialization; CLI stdout/stderr receives a second redaction pass.
 
+Saved passwords are the one persisted secret: `internal/credentials` keeps them AES-256-GCM encrypted per entry (the entry's kind, model, canonical host and port are additional data), with the vault key DPAPI-protected on Windows and a 0600 file elsewhere. The application fills a missing password only after profile resolution and only when the request asks for it, refuses saved root passwords on Telnet-capable runs, never auto-accepts host keys for them, marks a refused value rejected, and saves typed values only after the device accepted them. Frontends get metadata and notes, never values.
+
 The Web Session keeps `stok` private and prevents JSON/formatted disclosure. Login responses and remote command output are not copied into errors by default. Reports never contain admin/root passwords, password hashes, Base64 password payloads, Web keys, or tokens.
 
 ## Transport contracts

@@ -66,6 +66,7 @@ func TestFileStoreRejectsInvalidInput(t *testing.T) {
 		"trailing data":  `{"schema_version":1,"operation":"enable","status":"failed"} {}`,
 		"unknown status": `{"schema_version":1,"operation":"enable","status":"maybe"}`,
 		"oversized":      `{"schema_version":1,"operation":"` + strings.Repeat("x", 70000) + `","status":"failed"}`,
+		"extra closer":   `{"schema_version":1,"operation":"enable","status":"failed","started_at":"2026-11-26T01:00:00Z"}}`,
 	} {
 		write(body)
 		if _, _, err := store.Load(key); err == nil {

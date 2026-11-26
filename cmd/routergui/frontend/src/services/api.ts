@@ -28,6 +28,10 @@ export interface OperationRequest {
   AckDeep: string;
   ToolVersion: string;
   HostKey: HostKeyPreferences;
+  /** Fill passwords left empty from the encrypted vault; deep persistence ignores it. */
+  UseSavedPassword: boolean;
+  /** Save typed passwords after the router accepted them; deep persistence ignores it. */
+  RememberPassword: boolean;
 }
 
 export interface ProgressPayload {
@@ -108,6 +112,8 @@ export interface GuideRequest {
   Confirmed: boolean;
   ToolVersion: string;
   HostKey: HostKeyPreferences;
+  UseSavedPassword: boolean;
+  RememberPassword: boolean;
 }
 
 export type GuideGoal = "ssh" | "backup" | "soft" | "reboot";
@@ -195,6 +201,9 @@ export interface GuideState {
   recovery?: OutcomeRecord;
   recovery_blocked: boolean;
   locked: boolean;
+  /** A usable saved password exists and will be filled in (only with UseSavedPassword). */
+  saved_admin: boolean;
+  saved_root: boolean;
 }
 
 /** A guided plan (app.GuidePlanReport); confirmation and plan_digest exist only when ready. */
@@ -214,6 +223,7 @@ export interface GuidePlanReport {
   required_inputs?: string[];
   confirmation?: GuideConfirmation;
   plan_digest?: string;
+  credentials?: CredentialNote[];
   error?: ReportError;
 }
 
@@ -254,6 +264,39 @@ export interface RecoveryReport {
   error?: ReportError;
 }
 
+/** What happened to a saved or remembered password (app.CredentialNote); never the value. */
+export interface CredentialNote {
+  kind: "web-admin" | "root";
+  action: "used_saved" | "saved" | "save_failed" | "rejected" | "unavailable";
+  error?: ReportError;
+}
+
+/** Metadata of one saved password (credentials.Entry). */
+export interface CredentialEntry {
+  kind: "web-admin" | "root";
+  scope: string;
+  host: string;
+  port: number;
+  saved_at: string;
+  rejected_at?: string;
+}
+
+export interface CredentialReport {
+  schema_version: number;
+  operation: string;
+  status: string;
+  entries: CredentialEntry[];
+  error?: ReportError;
+}
+
+/** Selects saved passwords to forget (guiapi.CredentialFilter); empty fields match every entry. */
+export interface CredentialFilter {
+  Kind: string;
+  Scope: string;
+  Host: string;
+  Port: number;
+}
+
 export interface HistoryEntry {
   operation_id: string;
   operation: string;
@@ -275,6 +318,9 @@ export interface RouterAPI {
   GuidePlan(request: GuideRequest): Promise<GuidePlanReport>;
   GuideApply(request: GuideRequest): Promise<GuideApplyReport>;
   AcknowledgeRecovery(request: OperationRequest): Promise<RecoveryReport>;
+  CredentialStatus(): Promise<CredentialReport>;
+  ForgetCredential(filter: CredentialFilter): Promise<CredentialReport>;
+  ForgetAllCredentials(): Promise<CredentialReport>;
   Catalog(): Promise<CatalogEntry[]>;
   Cancel(operationID: string): Promise<boolean>;
   ListReports(): Promise<HistoryEntry[]>;

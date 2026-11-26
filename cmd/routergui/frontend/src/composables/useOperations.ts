@@ -124,6 +124,8 @@ export function useOperations(api: RouterAPI) {
       RunDir: runDir.value,
       AckDeep: ackDeep.value,
       ToolVersion: "dev",
+      UseSavedPassword: false,
+      RememberPassword: false,
       HostKey: { ...hostKey },
     };
   }

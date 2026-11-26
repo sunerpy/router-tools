@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/sunerpy/router-tools/internal/backup"
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 	"github.com/sunerpy/router-tools/internal/secret"
@@ -38,6 +39,7 @@ type SoftRequest struct {
 	Confirmed     bool
 	// ExpectedIdentity, set by a guided run, must match the device after the lock is taken.
 	ExpectedIdentity *ConfirmedIdentity
+	Credentials      CredentialUse
 }
 
 // SoftReport wraps installation evidence without claiming reboot verification.
@@ -49,6 +51,7 @@ type SoftReport struct {
 	Device        device.Observation `json:"device"`
 	Profile       device.Profile     `json:"profile"`
 	Result        SoftResult         `json:"result"`
+	Credentials   []CredentialNote   `json:"credentials,omitempty"`
 	Error         *device.Error      `json:"error,omitempty"`
 }
 
@@ -61,6 +64,7 @@ type RebootReport struct {
 	Device        device.Observation `json:"device"`
 	Profile       device.Profile     `json:"profile"`
 	Result        RebootResult       `json:"result"`
+	Credentials   []CredentialNote   `json:"credentials,omitempty"`
 	Error         *device.Error      `json:"error,omitempty"`
 }
 
@@ -81,12 +85,15 @@ func (s *Service) softOperation(ctx context.Context, request SoftRequest, events
 	}
 	report := SoftReport{SchemaVersion: 1, Operation: operation, Status: "running", Host: request.Target.Host}
 	emit := operationEmitter(operation, events)
+	redactor := secret.NewRedactor(request.RootPassword.Expose())
+	var creds *credentialSession
 	fail := func(err error) (SoftReport, error) {
 		normalized := normalizeError(err)
 		redacted := *normalized
-		redacted.Message = secret.NewRedactor(request.RootPassword.Expose()).Text(redacted.Message)
+		redacted.Message = redactor.Text(redacted.Message)
 		report.Status = StatusFailed
 		report.Error = &redacted
+		report.Credentials = creds.report()
 		emit("failed", StatusFailed)
 		return report, &redacted
 	}
@@ -118,6 +125,12 @@ func (s *Service) softOperation(ctx context.Context, request SoftRequest, events
 	if err := checkExpectedIdentity(request.ExpectedIdentity, probe.Observation, report.Profile); err != nil {
 		return fail(err)
 	}
+	creds = s.credentialSession(request.Credentials, request.Target, report.Profile, redactor)
+	root, err := creds.root(request.RootPassword, request.AllowTelnet)
+	if err != nil {
+		return fail(err)
+	}
+	policy := creds.hostKeys(request.HostKeyPolicy)
 	guard, err := s.beginWrite(request.Target, operation, state.WriteEvidence{})
 	if err != nil {
 		return fail(err)
@@ -128,10 +141,11 @@ func (s *Service) softOperation(ctx context.Context, request SoftRequest, events
 		return settleReport(guard, &final, final.Status, result.WriteStarted, state.WriteEvidence{WriteStarted: result.WriteStarted}, finalErr, func(e *device.Error) { final.Error = e })
 	}
 	if remove {
-		result, err = provider.RemoveSoft(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, request.AllowTelnet)
+		result, err = provider.RemoveSoft(ctx, request.Target, root, policy, request.AllowTelnet)
 	} else {
-		result, err = provider.InstallSoft(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, request.AllowTelnet)
+		result, err = provider.InstallSoft(ctx, request.Target, root, policy, request.AllowTelnet)
 	}
+	creds.observe(err)
 	report.Result = result
 	if err != nil {
 		return finish(fail(err))
@@ -139,6 +153,10 @@ func (s *Service) softOperation(ctx context.Context, request SoftRequest, events
 	if !result.Verified {
 		return finish(fail(&device.Error{Code: device.CodeRemoteCommandFailed, Message: "soft operation did not pass read-back verification"}))
 	}
+	if !request.AllowTelnet {
+		creds.remember(credentials.KindRoot)
+	}
+	report.Credentials = creds.report()
 	report.Status = StatusSucceeded
 	emit("completed", StatusSucceeded)
 	return finish(report, nil)
@@ -148,12 +166,15 @@ func (s *Service) softOperation(ctx context.Context, request SoftRequest, events
 func (s *Service) RebootVerify(ctx context.Context, request SoftRequest, events EventSink) (RebootReport, error) {
 	report := RebootReport{SchemaVersion: 1, Operation: "reboot-verify", Status: "running", Host: request.Target.Host}
 	emit := operationEmitter("reboot-verify", events)
+	redactor := secret.NewRedactor(request.RootPassword.Expose())
+	var creds *credentialSession
 	fail := func(err error) (RebootReport, error) {
 		normalized := normalizeError(err)
 		redacted := *normalized
-		redacted.Message = secret.NewRedactor(request.RootPassword.Expose()).Text(redacted.Message)
+		redacted.Message = redactor.Text(redacted.Message)
 		report.Status = StatusFailed
 		report.Error = &redacted
+		report.Credentials = creds.report()
 		emit("failed", StatusFailed)
 		return report, &redacted
 	}
@@ -184,12 +205,18 @@ func (s *Service) RebootVerify(ctx context.Context, request SoftRequest, events 
 	if err := checkExpectedIdentity(request.ExpectedIdentity, probe.Observation, report.Profile); err != nil {
 		return fail(err)
 	}
+	creds = s.credentialSession(request.Credentials, request.Target, report.Profile, redactor)
+	root, err := creds.root(request.RootPassword, request.AllowTelnet)
+	if err != nil {
+		return fail(err)
+	}
 	guard, err := s.beginWrite(request.Target, "reboot-verify", state.WriteEvidence{})
 	if err != nil {
 		return fail(err)
 	}
 	emit("reboot", "running")
-	result, err := verifier.RebootVerify(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, request.AllowTelnet)
+	result, err := verifier.RebootVerify(ctx, request.Target, root, creds.hostKeys(request.HostKeyPolicy), request.AllowTelnet)
+	creds.observe(err)
 	report.Result = result
 	finish := func(final RebootReport, finalErr error) (RebootReport, error) {
 		return settleReport(guard, &final, final.Status, result.WriteStarted, state.WriteEvidence{WriteStarted: result.WriteStarted}, finalErr, func(e *device.Error) { final.Error = e })
@@ -200,6 +227,10 @@ func (s *Service) RebootVerify(ctx context.Context, request SoftRequest, events 
 	if !result.SSHVerified || !result.SoftVerified || result.NewBootID == result.OldBootID {
 		return finish(fail(&device.Error{Code: device.CodeRebootTimeout, Message: "reboot verification evidence is incomplete"}))
 	}
+	if !request.AllowTelnet {
+		creds.remember(credentials.KindRoot)
+	}
+	report.Credentials = creds.report()
 	report.Status = StatusSucceeded
 	emit("completed", StatusSucceeded)
 	return finish(report, nil)
@@ -215,6 +246,7 @@ type BackupCreateRequest struct {
 	ToolVersion   string
 	// ExpectedIdentity, set by a guided run, must match the device after the lock is taken.
 	ExpectedIdentity *ConfirmedIdentity
+	Credentials      CredentialUse
 }
 
 // BackupCreateReport includes the completed manifest only on success.
@@ -227,6 +259,7 @@ type BackupCreateReport struct {
 	Profile       device.Profile     `json:"profile"`
 	OutputDir     string             `json:"output_dir"`
 	Manifest      *backup.Manifest   `json:"manifest,omitempty"`
+	Credentials   []CredentialNote   `json:"credentials,omitempty"`
 	Error         *device.Error      `json:"error,omitempty"`
 }
 
@@ -234,19 +267,22 @@ type BackupCreateReport struct {
 func (s *Service) BackupCreate(ctx context.Context, request BackupCreateRequest, events EventSink) (BackupCreateReport, error) {
 	report := BackupCreateReport{SchemaVersion: 1, Operation: "backup create", Status: "running", Host: request.Target.Host, OutputDir: request.OutputDir}
 	emit := operationEmitter("backup create", events)
+	redactor := secret.NewRedactor(request.RootPassword.Expose())
+	var creds *credentialSession
 	fail := func(err error) (BackupCreateReport, error) {
 		normalized := normalizeError(err)
 		redacted := *normalized
-		redacted.Message = secret.NewRedactor(request.RootPassword.Expose()).Text(redacted.Message)
+		redacted.Message = redactor.Text(redacted.Message)
 		report.Status = StatusFailed
 		report.Error = &redacted
+		report.Credentials = creds.report()
 		emit("failed", StatusFailed)
 		return report, &redacted
 	}
 	if err := request.Target.Validate(); err != nil {
 		return fail(err)
 	}
-	if err := request.RootPassword.Validate(); err != nil {
+	if err := checkTypedPassword(request.RootPassword, request.Credentials); err != nil {
 		return fail(err)
 	}
 	if request.OutputDir == "" && s.backupRoot == "" {
@@ -276,6 +312,11 @@ func (s *Service) BackupCreate(ctx context.Context, request BackupCreateRequest,
 	if err := checkExpectedIdentity(request.ExpectedIdentity, probe.Observation, report.Profile); err != nil {
 		return fail(err)
 	}
+	creds = s.credentialSession(request.Credentials, request.Target, report.Profile, redactor)
+	root, err := creds.root(request.RootPassword, false)
+	if err != nil {
+		return fail(err)
+	}
 	outputDir := request.OutputDir
 	if outputDir == "" {
 		outputDir = filepath.Join(s.managedBackupDir(request.Target, report.Profile), s.clock().UTC().Format(managedStampLayout))
@@ -285,12 +326,13 @@ func (s *Service) BackupCreate(ctx context.Context, request BackupCreateRequest,
 		report.OutputDir = outputDir
 	}
 	emit("backup", "running")
-	manifest, err := creator.CreateBackup(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, backup.CreateOptions{
+	manifest, err := creator.CreateBackup(ctx, request.Target, root, creds.hostKeys(request.HostKeyPolicy), backup.CreateOptions{
 		OutputDir:   outputDir,
 		ToolVersion: request.ToolVersion,
 		Device:      backupIdentity(probe.Observation, report.Profile),
 	})
 	if err != nil {
+		creds.observe(err)
 		return fail(err)
 	}
 	if !manifest.Complete {
@@ -299,6 +341,8 @@ func (s *Service) BackupCreate(ctx context.Context, request BackupCreateRequest,
 	if err := backup.Verify(outputDir); err != nil {
 		return fail(err)
 	}
+	creds.remember(credentials.KindRoot)
+	report.Credentials = creds.report()
 	report.Manifest = &manifest
 	report.Status = StatusSucceeded
 	emit("completed", StatusSucceeded)
@@ -307,12 +351,13 @@ func (s *Service) BackupCreate(ctx context.Context, request BackupCreateRequest,
 
 // BackupVerifyReport is produced entirely offline.
 type BackupVerifyReport struct {
-	SchemaVersion int           `json:"schema_version"`
-	Operation     string        `json:"operation"`
-	Status        string        `json:"status"`
-	Directory     string        `json:"directory"`
-	Valid         bool          `json:"valid"`
-	Error         *device.Error `json:"error,omitempty"`
+	SchemaVersion int              `json:"schema_version"`
+	Operation     string           `json:"operation"`
+	Status        string           `json:"status"`
+	Directory     string           `json:"directory"`
+	Valid         bool             `json:"valid"`
+	Credentials   []CredentialNote `json:"credentials,omitempty"`
+	Error         *device.Error    `json:"error,omitempty"`
 }
 
 // BackupVerify performs no network access.
@@ -342,7 +387,7 @@ func validateSoftRequest(request SoftRequest) error {
 	if err := request.Target.Validate(); err != nil {
 		return err
 	}
-	if err := request.RootPassword.Validate(); err != nil {
+	if err := checkTypedPassword(request.RootPassword, request.Credentials); err != nil {
 		return err
 	}
 	if !request.Confirmed {

@@ -16,11 +16,17 @@ export function Cancel(arg1:string):Promise<boolean>;
 
 export function Catalog():Promise<Array<device.CatalogEntry>>;
 
+export function CredentialStatus():Promise<app.CredentialReport>;
+
 export function DeepPersist(arg1:guiapi.OperationRequest):Promise<app.DeepReport>;
 
 export function Doctor(arg1:guiapi.OperationRequest):Promise<app.DoctorReport>;
 
 export function EnableSSH(arg1:guiapi.OperationRequest):Promise<app.EnableReport>;
+
+export function ForgetAllCredentials():Promise<app.CredentialReport>;
+
+export function ForgetCredential(arg1:guiapi.CredentialFilter):Promise<app.CredentialReport>;
 
 export function GuideApply(arg1:guiapi.GuideRequest):Promise<app.GuideApplyReport>;
 

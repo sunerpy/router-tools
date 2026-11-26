@@ -60,6 +60,22 @@ secret-provider read router-admin | \
 
 Do not put passwords in command-line arguments, exported environment variables, JSON configuration, or shell history.
 
+## Saved passwords
+
+```bash
+routerctl --remember-password verify          # save the root password once SSH root verification accepted it
+routerctl --use-saved-password setup          # fill passwords that are not typed from the vault
+routerctl credentials list                    # kind, model, host, port, saved and rejected times; never values
+routerctl credentials forget --host 192.168.31.1
+routerctl credentials forget --all            # delete every saved password and the vault key
+```
+
+- `--remember-password` saves a typed password once the step that used it was accepted by the router: the Web admin password after a successful Web login (`doctor --with-admin-auth`, or a successful `enable`), the root password after password-authenticated SSH root verification (`doctor --with-root-verify`, `verify`, `setup` detection, and successful `enable`, `persist`, `reboot-verify` and `backup` runs without `--allow-telnet`). A step that itself ends partial, unknown or failed saves nothing and never overwrites an entry; a later step failing in the same run does not undo an earlier save.
+- `--use-saved-password` fills only passwords that are not typed or piped. Interactive runs prompt when no usable entry exists for the host and port, and always prompt for the root password with `--allow-telnet`; non-interactive runs fail with `CREDENTIAL_NOT_FOUND` (exit 2) before any device write. `setup` asks only for what its plan still needs; without a usable saved password, a non-interactive `setup` fails with `INVALID_PASSWORD` (also exit 2).
+- A saved root password is never used when Telnet is allowed, and it disables `--accept-new-host-key`. The new root password of `enable` and of the guided enable step is always typed. `deep-persist` refuses both flags.
+- A saved password the router refuses is not sent again or retried and is marked rejected: a single command fails, `setup` detection asks for the current password instead. The entry is not filled again until a typed password is verified and saved with `--remember-password`.
+- `credentials forget` needs at least one of `--kind`, `--scope`, `--host`, `--port`, or `--all`. A vault that cannot be read or decrypted reports `CREDENTIAL_STORE_FAILED` (exit 11).
+
 ## Read-only discovery
 
 ```bash
@@ -107,6 +123,7 @@ After a change ended `partial` or `unknown`, failed after a write may have been 
 | Target locks                    | `<user config dir>/routerctl/locks/`                           |
 | Deep journals without a run dir | `<user config dir>/routerctl/deep/<model>/<host>-<key>/`       |
 | Backups without `--output`      | `<home>/RouterTools/backups/<model>/<host>-<key>/<UTC stamp>/` |
+| Saved passwords                 | `<user config dir>/routerctl/credentials/`                     |
 
 `<host>` is the canonical host (IP literals normalized, host names in lower case) and `<key>` the first 12 hex characters of the router's port-independent recovery key, so changing a management port or the spelling of the host never selects another lock, record or directory. A journal in a custom `--run-dir`, or written by the desktop deep flow, is found only in that directory; check it before another deep attempt.
 
@@ -160,20 +177,20 @@ Read `RISKS.md` and `RECOVERY.md` first. The acknowledgement is the resolved pro
 
 Human reports go to stdout; progress and warnings go to stderr. `--json` emits one JSON report object on stdout, including failed operations where a report is available. Run reports are unique 0600 JSON files under `run-dir`; deep operations additionally write the stable-stage journal.
 
-| Exit | Meaning                                                                 |
-| ---: | ----------------------------------------------------------------------- |
-|    0 | All required evidence passed or the exact target state already existed  |
-|    2 | CLI/configuration/password validation                                   |
-|    3 | Network/transport/protocol connection failure                           |
-|    4 | Web/SSH/Telnet authentication failure                                   |
-|    5 | Device/profile/capability/host-key compatibility failure                |
-|    6 | Device API explicitly rejected a request                                |
-|    7 | Remote command or tool failure                                          |
-|    8 | Final state/root/reboot verification failure                            |
-|    9 | Safety precondition, confirmation, lock, deep journal, or recovery gate |
-|   10 | Partial completion, cleanup failure, or unknown remote result           |
-|   11 | Local backup integrity/disk verification or recovery record failure     |
-|   12 | Unexpected internal error                                               |
-|  130 | Cancellation                                                            |
+| Exit | Meaning                                                                             |
+| ---: | ----------------------------------------------------------------------------------- |
+|    0 | All required evidence passed or the exact target state already existed              |
+|    2 | CLI/configuration/password validation, or no usable saved password                  |
+|    3 | Network/transport/protocol connection failure                                       |
+|    4 | Web/SSH/Telnet authentication failure                                               |
+|    5 | Device/profile/capability/host-key compatibility failure                            |
+|    6 | Device API explicitly rejected a request                                            |
+|    7 | Remote command or tool failure                                                      |
+|    8 | Final state/root/reboot verification failure                                        |
+|    9 | Safety precondition, confirmation, lock, deep journal, or recovery gate             |
+|   10 | Partial completion, cleanup failure, or unknown remote result                       |
+|   11 | Local backup integrity/disk verification, recovery record or password vault failure |
+|   12 | Unexpected internal error                                                           |
+|  130 | Cancellation                                                                        |
 
 Nonzero statuses require reading the report. In particular, `partial` and `unknown` are not safe automatic-retry signals.

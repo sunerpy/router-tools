@@ -89,6 +89,19 @@ func (a *App) AcknowledgeRecovery(request guiapi.OperationRequest) (app.Recovery
 	return a.service.AcknowledgeRecovery(a.ctx, request)
 }
 
+// CredentialStatus lists saved passwords without their values.
+func (a *App) CredentialStatus() (app.CredentialReport, error) { return a.service.CredentialStatus() }
+
+// ForgetCredential forgets the saved passwords matching the filter.
+func (a *App) ForgetCredential(filter guiapi.CredentialFilter) (app.CredentialReport, error) {
+	return a.service.ForgetCredential(filter)
+}
+
+// ForgetAllCredentials forgets every saved password.
+func (a *App) ForgetAllCredentials() (app.CredentialReport, error) {
+	return a.service.ForgetAllCredentials()
+}
+
 func (a *App) Catalog() []device.CatalogEntry { return a.service.Catalog() }
 
 func (a *App) Cancel(operationID string) bool              { return a.service.Cancel(operationID) }

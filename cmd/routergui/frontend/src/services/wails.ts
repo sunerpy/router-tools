@@ -1,5 +1,7 @@
 import type {
   CatalogEntry,
+  CredentialEntry,
+  CredentialReport,
   GuideApplyReport,
   GuideGoal,
   GuidePlanReport,
@@ -47,6 +49,9 @@ export function createAPI(): RouterAPI {
       GuidePlan: (request) => app.GuidePlan(request),
       GuideApply: (request) => app.GuideApply(request),
       AcknowledgeRecovery: (request) => app.AcknowledgeRecovery(request),
+      CredentialStatus: () => app.CredentialStatus(),
+      ForgetCredential: (filter) => app.ForgetCredential(filter),
+      ForgetAllCredentials: () => app.ForgetAllCredentials(),
       Catalog: () => app.Catalog(),
       Cancel: (id) => app.Cancel(id),
       ListReports: () => app.ListReports(),
@@ -194,7 +199,11 @@ function previewSteps(goals: GuideGoal[], configured: boolean): GuideStep[] {
   return goals.map((goal) => steps[goal]);
 }
 
-function previewPlan(request: GuideRequest, scenario: string): GuidePlanReport {
+function previewPlan(
+  request: GuideRequest,
+  scenario: string,
+  vault: CredentialEntry[],
+): GuidePlanReport {
   const goals = previewGoals(request.Goals);
   const device = {
     device_id: "PREVIEW",
@@ -216,6 +225,8 @@ function previewPlan(request: GuideRequest, scenario: string): GuidePlanReport {
       root_ssh: "not_checked" as const,
       recovery_blocked: false,
       locked: false,
+      saved_admin: false,
+      saved_root: false,
     },
   };
   const blocked = (reason: string) =>
@@ -290,30 +301,50 @@ function previewPlan(request: GuideRequest, scenario: string): GuidePlanReport {
   const configured = scenario === "configured";
   const steps = previewSteps(goals, configured);
   const changes = steps.some((step) => step.action === "run" || step.action === "decide_after");
+  const saved = (kind: CredentialEntry["kind"], port: number) =>
+    request.UseSavedPassword &&
+    vault.some(
+      (entry) =>
+        entry.kind === kind &&
+        entry.host === request.Target.host &&
+        entry.port === port &&
+        !entry.rejected_at,
+    );
+  const savedAdmin = !configured && saved("web-admin", request.Target.web_port);
+  const savedRoot = configured && saved("root", request.Target.ssh_port);
+  const inputs = !changes
+    ? []
+    : configured
+      ? ["root_password"]
+      : ["admin_password", "new_root_password"];
+  const requiredInputs = inputs.filter(
+    (input) =>
+      !(input === "admin_password" && savedAdmin) && !(input === "root_password" && savedRoot),
+  );
   return {
     ...base,
     status: "succeeded",
-    state: configured
-      ? {
-          ...base.state,
-          ssh: "open",
-          root_ssh: "verified",
-          soft: "installed_verified",
-          backup: {
-            path: "~/RouterTools/backups/xiaomi-rd08/preview",
-            created_at: "2026-11-26T02:00:00Z",
-            boot_id: "preview",
-          },
-        }
-      : base.state,
+    state: {
+      ...(configured
+        ? {
+            ...base.state,
+            ssh: "open",
+            root_ssh: "verified" as const,
+            soft: "installed_verified",
+            backup: {
+              path: "~/RouterTools/backups/xiaomi-rd08/preview",
+              created_at: "2026-11-26T02:00:00Z",
+              boot_id: "preview",
+            },
+          }
+        : base.state),
+      saved_admin: savedAdmin,
+      saved_root: savedRoot,
+    },
     steps,
     ready: true,
     changes,
-    required_inputs: !changes
-      ? undefined
-      : configured
-        ? ["root_password"]
-        : ["admin_password", "new_root_password"],
+    required_inputs: requiredInputs.length > 0 ? requiredInputs : undefined,
     confirmation: {
       schema_version: 1,
       target: request.Target,
@@ -396,6 +427,14 @@ function previewApply(request: GuideRequest, scenario: string): GuideApplyReport
 
 function createMockAPI(): RouterAPI {
   const history: HistoryEntry[] = [];
+  // Preview-only vault: metadata of "saved" passwords, never a value.
+  let vault: CredentialEntry[] = [];
+  const credentialReport = (operation: string, entries: CredentialEntry[]): CredentialReport => ({
+    schema_version: 1,
+    operation,
+    status: "succeeded",
+    entries: entries.map((entry) => ({ ...entry })),
+  });
   let progressListener: ((payload: any) => void) | undefined;
   let hostKeyListener: ((prompt: HostKeyPrompt) => void) | undefined;
 
@@ -496,11 +535,26 @@ function createMockAPI(): RouterAPI {
     // A plan changes nothing and stays out of the history, like the desktop binding.
     GuidePlan: async (request) => {
       await new Promise((resolve) => setTimeout(resolve, 120));
-      return previewPlan(request, window.__ROUTER_PREVIEW_SCENARIO__ || "success");
+      return previewPlan(request, window.__ROUTER_PREVIEW_SCENARIO__ || "success", vault);
     },
     GuideApply: async (request) => {
       if (!request.Confirmation) {
         throw new Error("a guided run requires the confirmation returned by its plan");
+      }
+      if (!request.RootPassword && !request.UseSavedPassword) {
+        // Failed reports resolve, as the desktop binding does.
+        const refused: GuideApplyReport = {
+          schema_version: 1,
+          operation: "guide apply",
+          status: "failed",
+          host: request.Confirmation.target.host,
+          device: { device_id: "", rom_version: "", new_encrypt_mode: 0 },
+          profile: { ...previewProfile, id: "", capabilities: null },
+          plan_digest: request.PlanDigest,
+          steps: [],
+          error: { code: "INVALID_PASSWORD", message: "password must not be empty" },
+        };
+        return refused;
       }
       const scenario = window.__ROUTER_PREVIEW_SCENARIO__ || "success";
       for (const step of request.Confirmation.steps) {
@@ -517,6 +571,30 @@ function createMockAPI(): RouterAPI {
       }
       await new Promise((resolve) => setTimeout(resolve, 180));
       const report = previewApply(request, scenario);
+      if (request.RememberPassword) {
+        // Like the application: a typed password is saved once a step that used it succeeded.
+        const target = request.Confirmation.target;
+        const host = target.host.toLowerCase();
+        const remember = (kind: CredentialEntry["kind"], port: number) => {
+          vault = vault.filter(
+            (entry) => !(entry.kind === kind && entry.host === host && entry.port === port),
+          );
+          vault.push({
+            kind,
+            scope: "xiaomi-rd08",
+            host,
+            port,
+            saved_at: new Date().toISOString(),
+          });
+        };
+        const enabled = report.steps.some(
+          (step) => step.id === "enable_ssh" && step.status === "succeeded",
+        );
+        if (request.AdminPassword && enabled) remember("web-admin", target.web_port);
+        if (request.RootPassword && report.steps.some((step) => step.status === "succeeded")) {
+          remember("root", target.ssh_port);
+        }
+      }
       history.unshift({
         operation_id: request.OperationID,
         operation: "guide apply",
@@ -550,6 +628,36 @@ function createMockAPI(): RouterAPI {
         time: new Date().toISOString(),
       });
       return report;
+    },
+    CredentialStatus: async () => credentialReport("credentials list", vault),
+    ForgetCredential: async (filter) => {
+      const invalid =
+        (!filter.Kind && !filter.Scope && !filter.Host && !filter.Port) ||
+        (filter.Kind !== "" && filter.Kind !== "web-admin" && filter.Kind !== "root") ||
+        filter.Port < 0 ||
+        filter.Port > 65535;
+      if (invalid) {
+        return {
+          ...credentialReport("credentials forget", []),
+          status: "failed",
+          error: {
+            code: "INVALID_ARGUMENT",
+            message: "choose which saved passwords to forget, or forget all",
+          },
+        };
+      }
+      const matches = (entry: CredentialEntry) =>
+        (!filter.Kind || entry.kind === filter.Kind) &&
+        (!filter.Scope || entry.scope === filter.Scope) &&
+        (!filter.Host || entry.host === filter.Host.toLowerCase()) &&
+        (!filter.Port || entry.port === filter.Port);
+      const forgotten = vault.filter(matches);
+      vault = vault.filter((entry) => !matches(entry));
+      return credentialReport("credentials forget", forgotten);
+    },
+    ForgetAllCredentials: async () => {
+      vault = [];
+      return credentialReport("credentials forget --all", []);
     },
     Catalog: async () => previewCatalog,
     Cancel: async () => true,

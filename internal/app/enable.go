@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 	"github.com/sunerpy/router-tools/internal/secret"
@@ -50,6 +51,8 @@ type EnableRequest struct {
 	Confirmed     bool
 	// ExpectedIdentity, set by a guided run, must match the device after the lock is taken.
 	ExpectedIdentity *ConfirmedIdentity
+	// Credentials may fill the admin password; the root password the flow sets is always typed.
+	Credentials CredentialUse
 }
 
 // EnableReport is safe for CLI/GUI rendering after error redaction.
@@ -66,6 +69,7 @@ type EnableReport struct {
 	AttemptedMACs []string           `json:"attempted_macs,omitempty"`
 	Cleanup       []CleanupResult    `json:"cleanup,omitempty"`
 	Warnings      []string           `json:"warnings,omitempty"`
+	Credentials   []CredentialNote   `json:"credentials,omitempty"`
 	Error         *device.Error      `json:"error,omitempty"`
 }
 
@@ -74,6 +78,7 @@ func (s *Service) EnableSSH(ctx context.Context, request EnableRequest, events E
 	report := EnableReport{SchemaVersion: 1, Operation: "enable", Status: "running", Host: request.Target.Host}
 	emit := operationEmitter("enable", events)
 	redactor := secret.NewRedactor(request.AdminPassword.Expose(), request.RootPassword.Expose())
+	var creds *credentialSession
 	fail := func(err error) (EnableReport, error) {
 		normalized := normalizeError(err)
 		redacted := *normalized
@@ -88,6 +93,7 @@ func (s *Service) EnableSSH(ctx context.Context, request EnableRequest, events E
 		for i := range report.Warnings {
 			report.Warnings[i] = redactor.Text(report.Warnings[i])
 		}
+		report.Credentials = creds.report()
 		emit("failed", report.Status)
 		return report, &redacted
 	}
@@ -95,7 +101,7 @@ func (s *Service) EnableSSH(ctx context.Context, request EnableRequest, events E
 	if err := request.Target.Validate(); err != nil {
 		return fail(err)
 	}
-	if err := request.AdminPassword.Validate(); err != nil {
+	if err := checkTypedPassword(request.AdminPassword, request.Credentials); err != nil {
 		return fail(err)
 	}
 	if err := request.RootPassword.Validate(); err != nil {
@@ -134,12 +140,22 @@ func (s *Service) EnableSSH(ctx context.Context, request EnableRequest, events E
 	if err := checkExpectedIdentity(request.ExpectedIdentity, probe.Observation, report.Profile); err != nil {
 		return fail(err)
 	}
+	creds = s.credentialSession(request.Credentials, request.Target, report.Profile, redactor)
+	admin, err := creds.admin(request.AdminPassword)
+	if err != nil {
+		return fail(err)
+	}
+	root, err := creds.root(request.RootPassword, false)
+	if err != nil {
+		return fail(err)
+	}
 	guard, err := s.beginWrite(request.Target, "enable", state.WriteEvidence{})
 	if err != nil {
 		return fail(err)
 	}
 	emit("enable", "running")
-	result, err := enabler.EnableSSH(ctx, request.Target, request.AdminPassword, request.RootPassword, request.HostKeyPolicy)
+	result, err := enabler.EnableSSH(ctx, request.Target, admin, root, creds.hostKeys(request.HostKeyPolicy))
+	creds.observe(err)
 	finish := func(final EnableReport, finalErr error) (EnableReport, error) {
 		writePossible := result.AcceptedSteps > 0 || len(result.AttemptedMACs) > 0 ||
 			final.Status == StatusPartial || final.Status == StatusUnknown
@@ -178,6 +194,10 @@ func (s *Service) EnableSSH(ctx context.Context, request EnableRequest, events E
 	if report.Status == "" {
 		report.Status = StatusSucceeded
 	}
+	if report.Status == StatusSucceeded {
+		creds.remember(credentials.KindWebAdmin, credentials.KindRoot)
+	}
+	report.Credentials = creds.report()
 	emit("completed", report.Status)
 	return finish(report, nil)
 }

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	"github.com/sunerpy/router-tools/internal/app"
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/devices/builtin"
 	"github.com/sunerpy/router-tools/internal/safety/oplock"
@@ -21,6 +22,7 @@ type Paths struct {
 	State       string // <UserConfigDir>/routerctl/state: write-ahead outcome records
 	DeepJournal string // <UserConfigDir>/routerctl/deep: managed deep journals
 	Backups     string // <UserHomeDir>/RouterTools/backups: managed partition backups (not roaming)
+	Credentials string // <UserConfigDir>/routerctl/credentials: the encrypted password vault
 }
 
 // DefaultPaths resolves the managed directories for the current user. It fails instead of falling back to
@@ -40,12 +42,13 @@ func DefaultPaths() (Paths, error) {
 		State:       filepath.Join(base, "state"),
 		DeepJournal: filepath.Join(base, "deep"),
 		Backups:     filepath.Join(home, "RouterTools", "backups"),
+		Credentials: filepath.Join(base, "credentials"),
 	}, nil
 }
 
 // NewService builds the production application service. It always carries the recovery outcome store.
 func NewService(paths Paths) (*app.Service, error) {
-	if paths.Locks == "" || paths.State == "" || paths.DeepJournal == "" || paths.Backups == "" {
+	if paths.Locks == "" || paths.State == "" || paths.DeepJournal == "" || paths.Backups == "" || paths.Credentials == "" {
 		return nil, fmt.Errorf("every managed directory must be set")
 	}
 	registry, err := device.NewRegistry(builtin.Adapters()...)
@@ -55,6 +58,7 @@ func NewService(paths Paths) (*app.Service, error) {
 	return app.NewServiceWithOptions(registry, builtin.Discovery(), app.Options{
 		Locker:      oplock.FlockLocker{Dir: paths.Locks},
 		Outcomes:    state.FileStore{Dir: paths.State},
+		Credentials: credentials.FileVault{Dir: paths.Credentials},
 		BackupRoot:  paths.Backups,
 		JournalRoot: paths.DeepJournal,
 	})

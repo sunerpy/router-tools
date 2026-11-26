@@ -13,6 +13,7 @@ import (
 
 	"github.com/sunerpy/router-tools/internal/app"
 	"github.com/sunerpy/router-tools/internal/backup"
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 	"github.com/sunerpy/router-tools/internal/secret"
@@ -182,6 +183,7 @@ type guideFixture struct {
 	service    *app.Service
 	router     *simRouter
 	store      *memoryOutcomes
+	vault      *credentials.Memory
 	backupRoot string
 	target     device.Target
 }
@@ -193,10 +195,10 @@ func newGuideFixture(t *testing.T) *guideFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture := &guideFixture{router: router, store: newMemoryOutcomes(), backupRoot: t.TempDir(), target: device.DefaultTarget()}
+	fixture := &guideFixture{router: router, store: newMemoryOutcomes(), vault: credentials.NewMemory(), backupRoot: t.TempDir(), target: device.DefaultTarget()}
 	clock := time.Date(2026, 11, 26, 3, 0, 0, 0, time.UTC)
 	service, err := app.NewServiceWithOptions(registry, simProbe{r: router}, app.Options{
-		Outcomes: fixture.store, BackupRoot: fixture.backupRoot,
+		Outcomes: fixture.store, BackupRoot: fixture.backupRoot, Credentials: fixture.vault,
 		Clock: func() time.Time { clock = clock.Add(time.Second); return clock },
 	})
 	if err != nil {
@@ -747,5 +749,100 @@ func TestGuideApplyRunsTheSelectedRebootVerification(t *testing.T) {
 	}
 	if !reflect.DeepEqual(f.router.writes, []string{"RebootVerify"}) || report.Steps[3].Reboot == nil {
 		t.Fatalf("writes = %v, reboot report %v; want exactly one reboot verification", f.router.writes, report.Steps[3].Reboot)
+	}
+}
+
+var (
+	guideRootKey  = credentials.NewKey(credentials.KindRoot, "acme-r1", "192.168.31.1", 22)
+	guideAdminKey = credentials.NewKey(credentials.KindWebAdmin, "acme-r1", "192.168.31.1", 80)
+)
+
+func TestGuidePlanUsesASavedRootPassword(t *testing.T) {
+	t.Parallel()
+
+	f := newGuideFixture(t)
+	f.configured(t)
+	f.router.soft = app.SoftNotInstalled
+	_ = f.vault.Put(guideRootKey, mustPassword(t, "root-secret"), time.Now())
+	plan, err := f.service.GuidePlan(t.Context(), app.GuideRequest{Target: f.target, Goals: defaultGoals(), Credentials: app.CredentialUse{UseSaved: true}}, nil)
+	if err != nil || !plan.Ready {
+		t.Fatalf("GuidePlan() = ready %v, %v", plan.Ready, err)
+	}
+	if plan.State.RootSSH != app.RootSSHVerified || !plan.State.SavedRoot || plan.RequiredInputs != nil {
+		t.Fatalf("state %+v, inputs %v; want root verified with the saved password and nothing to ask", plan.State, plan.RequiredInputs)
+	}
+	if !hasNote(plan.Credentials, "root", app.CredentialUsedSaved) {
+		t.Fatalf("notes = %+v", plan.Credentials)
+	}
+
+	// The run fills the saved password into each step; nothing was typed.
+	report, err := f.service.GuideApply(t.Context(), app.GuideApplyRequest{
+		Confirmation: *plan.Confirmation, PlanDigest: plan.PlanDigest, Confirmed: true, Credentials: app.CredentialUse{UseSaved: true},
+	}, nil)
+	if err != nil || report.Status != app.StatusSucceeded || f.router.count("InstallSoft") != 1 {
+		t.Fatalf("GuideApply() = %q, %v; writes %v", report.Status, err, f.router.writes)
+	}
+}
+
+func TestGuidePlanMarksARejectedSavedRootPassword(t *testing.T) {
+	t.Parallel()
+
+	f := newGuideFixture(t)
+	f.router.sshOpen, f.router.rootPassword = true, "changed-meanwhile"
+	_ = f.vault.Put(guideRootKey, mustPassword(t, "root-secret"), time.Now())
+	plan, err := f.service.GuidePlan(t.Context(), app.GuideRequest{Target: f.target, Goals: defaultGoals(), Credentials: app.CredentialUse{UseSaved: true}}, nil)
+	if err != nil || plan.Steps[0].Action != app.ActionNeedsInput || plan.Steps[0].Reason != app.ReasonSSHAuthFailed {
+		t.Fatalf("GuidePlan() = %+v, %v; want the current root password asked for", plan.Steps, err)
+	}
+	if _, entry, _, _ := f.vault.Get(guideRootKey); !entry.Rejected() || plan.State.SavedRoot {
+		t.Fatalf("entry %+v saved-root %v; want the refused password marked rejected", entry, plan.State.SavedRoot)
+	}
+}
+
+func TestGuidePlanCountsASavedAdminPasswordAsProvided(t *testing.T) {
+	t.Parallel()
+
+	f := newGuideFixture(t)
+	_ = f.vault.Put(guideAdminKey, mustPassword(t, "admin-secret"), time.Now())
+	plan, err := f.service.GuidePlan(t.Context(), app.GuideRequest{Target: f.target, Goals: defaultGoals(), Credentials: app.CredentialUse{UseSaved: true}}, nil)
+	if err != nil || !plan.State.SavedAdmin || !reflect.DeepEqual(plan.RequiredInputs, []string{app.InputNewRootPassword}) {
+		t.Fatalf("GuidePlan() = saved-admin %v inputs %v, %v; want only the new root password asked for", plan.State.SavedAdmin, plan.RequiredInputs, err)
+	}
+
+	// The enable step may use the saved admin password, but the new root password must be typed.
+	request := app.GuideApplyRequest{Confirmation: *plan.Confirmation, PlanDigest: plan.PlanDigest, Confirmed: true, Credentials: app.CredentialUse{UseSaved: true}}
+	_, err = f.service.GuideApply(t.Context(), request, nil)
+	assertCode(t, err, device.CodeInvalidPassword)
+	if f.writeCount() != 0 {
+		t.Fatalf("writes %v before the new root password was typed", f.router.writes)
+	}
+	request.RootPassword = mustPassword(t, "new-root")
+	request.Credentials.Remember = true
+	report, err := f.service.GuideApply(t.Context(), request, nil)
+	if err != nil || report.Status != app.StatusSucceeded {
+		t.Fatalf("GuideApply() = %q, %v", report.Status, err)
+	}
+	if value, _, ok, _ := f.vault.Get(guideRootKey); !ok || value.Expose() != "new-root" {
+		t.Fatalf("saved root %q %v, want the new root password remembered after the verified enable", value.Expose(), ok)
+	}
+}
+
+func TestGuidePlanRemembersATypedRootPasswordOnlyAfterVerification(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		typed string
+		saved bool
+	}{{"root-secret", true}, {"wrong", false}} {
+		f := newGuideFixture(t)
+		f.configured(t)
+		_, _ = f.service.GuidePlan(t.Context(), app.GuideRequest{
+			Target: f.target, Goals: defaultGoals(), RootPassword: mustPassword(t, tc.typed),
+			Credentials: app.CredentialUse{Remember: true},
+		}, nil)
+		value, _, ok, _ := f.vault.Get(guideRootKey)
+		if ok != tc.saved || (ok && value.Expose() != tc.typed) {
+			t.Fatalf("typed %q: saved %q %v, want saved=%v", tc.typed, value.Expose(), ok, tc.saved)
+		}
 	}
 }
