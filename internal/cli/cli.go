@@ -268,14 +268,16 @@ func ExecuteWithInput(
 	}
 	verifyCommand.Flags().String("transport", "ssh", "shell transport: ssh, telnet, or auto")
 	root.AddCommand(verifyCommand)
-	addOperationCommands(root, &operationOptions{
+	options := &operationOptions{
 		target: &target, profileID: &profileID, jsonOutput: &jsonOutput,
 		stdin: stdin, service: service, info: info, redactor: redactor,
 		nonInteractive: &nonInteractive, adminPasswordStdin: &adminPasswordStdin,
 		rootPasswordStdin: &rootPasswordStdin, allowTelnet: &allowTelnet,
 		acceptNewHostKey: &acceptNewHostKey, hostKeySHA256: &hostKeySHA256,
 		knownHostsPath: &knownHostsPath, yes: &yes, ackDeep: &ackDeep, runDir: &runDir,
-	})
+	}
+	addOperationCommands(root, options)
+	addGuideCommands(root, options)
 
 	if err := root.ExecuteContext(ctx); err != nil {
 		_, _ = fmt.Fprint(stderr, redactor.Text(fmt.Sprintf("Error: %v\n", err)))
@@ -453,11 +455,12 @@ func exitCode(err error) int {
 		device.CodeDeepJournalExists,
 		device.CodeOperationLocked,
 		device.CodeSoftConfigConflict,
-		device.CodeBackupMissing:
+		device.CodeBackupMissing,
+		device.CodeRecoveryReviewRequired:
 		return 9
 	case device.CodeRemoteResultUnknown, device.CodeMACCleanupFailed:
 		return 10
-	case device.CodeBackupIncomplete, device.CodeBackupHashMismatch, device.CodeBackupLayoutMismatch:
+	case device.CodeBackupIncomplete, device.CodeBackupHashMismatch, device.CodeBackupLayoutMismatch, device.CodeStateStoreFailed:
 		return 11
 	case device.CodeUnsupportedDevice,
 		device.CodeUnsupportedFirmware,

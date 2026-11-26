@@ -1,9 +1,7 @@
-// Package oplock implements per-target non-blocking operation locks.
+// Package oplock implements per-router non-blocking operation locks.
 package oplock
 
 import (
-	"crypto/sha256"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -22,9 +20,7 @@ func (l FlockLocker) Acquire(target device.Target) (func() error, error) {
 	if err := os.MkdirAll(l.Dir, 0o700); err != nil {
 		return nil, err
 	}
-	key := fmt.Sprintf("%s|%d|%d|%d", target.Host, target.WebPort, target.SSHPort, target.TelnetPort)
-	name := fmt.Sprintf("%x.lock", sha256.Sum256([]byte(key)))
-	path := filepath.Join(l.Dir, name)
+	path := filepath.Join(l.Dir, device.RecoveryKey(target)+".lock")
 	lock := flock.New(path)
 	acquired, err := lock.TryLock()
 	if err != nil {

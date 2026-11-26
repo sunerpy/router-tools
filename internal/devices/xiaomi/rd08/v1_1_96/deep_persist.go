@@ -82,6 +82,7 @@ func (p *Prober) DeepPersist(ctx context.Context, params app.DeepParams) (app.De
 		return fail(err)
 	}
 
+	result.WriteStarted = true
 	if err := deepWrite(ctx, current, params.Journal, "CRASH_WRITE_STARTED", "CRASH_WRITE_ACCEPTED", crashWriteCommand); err != nil {
 		return fail(err)
 	}

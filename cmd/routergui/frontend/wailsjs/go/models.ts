@@ -118,12 +118,33 @@ export namespace app {
 	        this.error = source["error"];
 	    }
 	}
+	export class ConfirmedIdentity {
+	    device_id: string;
+	    hardware: string;
+	    display_name?: string;
+	    rom_version: string;
+	    profile_id: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ConfirmedIdentity(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.device_id = source["device_id"];
+	        this.hardware = source["hardware"];
+	        this.display_name = source["display_name"];
+	        this.rom_version = source["rom_version"];
+	        this.profile_id = source["profile_id"];
+	    }
+	}
 	export class DeepResult {
 	    status: string;
 	    accepted_writes: number;
 	    transitions?: BootTransition[];
 	    final_ssh_verified: boolean;
 	    soft_verified: boolean;
+	    write_started: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new DeepResult(source);
@@ -136,6 +157,7 @@ export namespace app {
 	        this.transitions = this.convertValues(source["transitions"], BootTransition);
 	        this.final_ssh_verified = source["final_ssh_verified"];
 	        this.soft_verified = source["soft_verified"];
+	        this.write_started = source["write_started"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -210,6 +232,7 @@ export namespace app {
 	    host: string;
 	    device: device.Observation;
 	    profile: device.Profile;
+	    candidates?: device.ProfileMatch[];
 	    compatible: boolean;
 	    ssh: string;
 	    telnet: string;
@@ -234,6 +257,7 @@ export namespace app {
 	        this.host = source["host"];
 	        this.device = this.convertValues(source["device"], device.Observation);
 	        this.profile = this.convertValues(source["profile"], device.Profile);
+	        this.candidates = this.convertValues(source["candidates"], device.ProfileMatch);
 	        this.compatible = source["compatible"];
 	        this.ssh = source["ssh"];
 	        this.telnet = source["telnet"];
@@ -324,6 +348,7 @@ export namespace app {
 	    new_boot_id: string;
 	    ssh_verified: boolean;
 	    soft_verified: boolean;
+	    write_started: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new RebootResult(source);
@@ -335,6 +360,7 @@ export namespace app {
 	        this.new_boot_id = source["new_boot_id"];
 	        this.ssh_verified = source["ssh_verified"];
 	        this.soft_verified = source["soft_verified"];
+	        this.write_started = source["write_started"];
 	    }
 	}
 	export class RebootReport {
@@ -381,12 +407,12 @@ export namespace app {
 		    return a;
 		}
 	}
-	
 	export class SoftResult {
 	    outcome: string;
 	    verified: boolean;
 	    reboot_verified: boolean;
 	    warnings?: string[];
+	    write_started: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new SoftResult(source);
@@ -398,6 +424,7 @@ export namespace app {
 	        this.verified = source["verified"];
 	        this.reboot_verified = source["reboot_verified"];
 	        this.warnings = source["warnings"];
+	        this.write_started = source["write_started"];
 	    }
 	}
 	export class SoftReport {
@@ -444,6 +471,369 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class GuideStepResult {
+	    id: string;
+	    action: string;
+	    reason?: string;
+	    status: string;
+	    effects?: string[];
+	    maintenance?: string;
+	    enable?: EnableReport;
+	    backup?: BackupCreateReport;
+	    soft?: SoftReport;
+	    reboot?: RebootReport;
+	    error?: device.Error;
+	
+	    static createFrom(source: any = {}) {
+	        return new GuideStepResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.action = source["action"];
+	        this.reason = source["reason"];
+	        this.status = source["status"];
+	        this.effects = source["effects"];
+	        this.maintenance = source["maintenance"];
+	        this.enable = this.convertValues(source["enable"], EnableReport);
+	        this.backup = this.convertValues(source["backup"], BackupCreateReport);
+	        this.soft = this.convertValues(source["soft"], SoftReport);
+	        this.reboot = this.convertValues(source["reboot"], RebootReport);
+	        this.error = this.convertValues(source["error"], device.Error);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GuideApplyReport {
+	    schema_version: number;
+	    operation: string;
+	    status: string;
+	    host: string;
+	    device: device.Observation;
+	    profile: device.Profile;
+	    plan_digest: string;
+	    steps: GuideStepResult[];
+	    error?: device.Error;
+	
+	    static createFrom(source: any = {}) {
+	        return new GuideApplyReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema_version = source["schema_version"];
+	        this.operation = source["operation"];
+	        this.status = source["status"];
+	        this.host = source["host"];
+	        this.device = this.convertValues(source["device"], device.Observation);
+	        this.profile = this.convertValues(source["profile"], device.Profile);
+	        this.plan_digest = source["plan_digest"];
+	        this.steps = this.convertValues(source["steps"], GuideStepResult);
+	        this.error = this.convertValues(source["error"], device.Error);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GuideConfirmedStep {
+	    id: string;
+	    action: string;
+	    effects?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GuideConfirmedStep(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.action = source["action"];
+	        this.effects = source["effects"];
+	    }
+	}
+	export class GuideConfirmation {
+	    schema_version: number;
+	    target: device.Target;
+	    identity: ConfirmedIdentity;
+	    goals: string[];
+	    reset_root_password: boolean;
+	    steps: GuideConfirmedStep[];
+	
+	    static createFrom(source: any = {}) {
+	        return new GuideConfirmation(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema_version = source["schema_version"];
+	        this.target = this.convertValues(source["target"], device.Target);
+	        this.identity = this.convertValues(source["identity"], ConfirmedIdentity);
+	        this.goals = source["goals"];
+	        this.reset_root_password = source["reset_root_password"];
+	        this.steps = this.convertValues(source["steps"], GuideConfirmedStep);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class GuideStep {
+	    id: string;
+	    action: string;
+	    reason: string;
+	    effects?: string[];
+	    inputs?: string[];
+	    maintenance?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new GuideStep(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.action = source["action"];
+	        this.reason = source["reason"];
+	        this.effects = source["effects"];
+	        this.inputs = source["inputs"];
+	        this.maintenance = source["maintenance"];
+	    }
+	}
+	export class ManagedBackup {
+	    path: string;
+	    // Go type: time
+	    created_at: any;
+	    boot_id: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ManagedBackup(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.boot_id = source["boot_id"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GuideState {
+	    ssh?: string;
+	    telnet?: string;
+	    root_ssh: string;
+	    soft?: string;
+	    backup?: ManagedBackup;
+	    recovery?: state.Outcome;
+	    recovery_blocked: boolean;
+	    locked: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new GuideState(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ssh = source["ssh"];
+	        this.telnet = source["telnet"];
+	        this.root_ssh = source["root_ssh"];
+	        this.soft = source["soft"];
+	        this.backup = this.convertValues(source["backup"], ManagedBackup);
+	        this.recovery = this.convertValues(source["recovery"], state.Outcome);
+	        this.recovery_blocked = source["recovery_blocked"];
+	        this.locked = source["locked"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class GuidePlanReport {
+	    schema_version: number;
+	    operation: string;
+	    status: string;
+	    host: string;
+	    device: device.Observation;
+	    profile: device.Profile;
+	    candidates?: device.ProfileMatch[];
+	    goals: string[];
+	    state: GuideState;
+	    steps: GuideStep[];
+	    ready: boolean;
+	    changes: boolean;
+	    required_inputs?: string[];
+	    confirmation?: GuideConfirmation;
+	    plan_digest?: string;
+	    error?: device.Error;
+	
+	    static createFrom(source: any = {}) {
+	        return new GuidePlanReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema_version = source["schema_version"];
+	        this.operation = source["operation"];
+	        this.status = source["status"];
+	        this.host = source["host"];
+	        this.device = this.convertValues(source["device"], device.Observation);
+	        this.profile = this.convertValues(source["profile"], device.Profile);
+	        this.candidates = this.convertValues(source["candidates"], device.ProfileMatch);
+	        this.goals = source["goals"];
+	        this.state = this.convertValues(source["state"], GuideState);
+	        this.steps = this.convertValues(source["steps"], GuideStep);
+	        this.ready = source["ready"];
+	        this.changes = source["changes"];
+	        this.required_inputs = source["required_inputs"];
+	        this.confirmation = this.convertValues(source["confirmation"], GuideConfirmation);
+	        this.plan_digest = source["plan_digest"];
+	        this.error = this.convertValues(source["error"], device.Error);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
+	
+	
+	
+	
+	export class RecoveryReport {
+	    schema_version: number;
+	    operation: string;
+	    status: string;
+	    host: string;
+	    acknowledged: boolean;
+	    last?: state.Outcome;
+	    error?: device.Error;
+	
+	    static createFrom(source: any = {}) {
+	        return new RecoveryReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema_version = source["schema_version"];
+	        this.operation = source["operation"];
+	        this.status = source["status"];
+	        this.host = source["host"];
+	        this.acknowledged = source["acknowledged"];
+	        this.last = this.convertValues(source["last"], state.Outcome);
+	        this.error = this.convertValues(source["error"], device.Error);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	
 	export class VerifyReport {
 	    schema_version: number;
@@ -594,6 +984,103 @@ export namespace backup {
 
 export namespace device {
 	
+	export class DeepPolicy {
+	    acknowledgement: string;
+	    reboot_transitions: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeepPolicy(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.acknowledgement = source["acknowledgement"];
+	        this.reboot_transitions = source["reboot_transitions"];
+	    }
+	}
+	export class Profile {
+	    id: string;
+	    model_id: string;
+	    vendor: string;
+	    model: string;
+	    hardware: string;
+	    firmware: string;
+	    capabilities: string[];
+	    deep?: DeepPolicy;
+	
+	    static createFrom(source: any = {}) {
+	        return new Profile(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.model_id = source["model_id"];
+	        this.vendor = source["vendor"];
+	        this.model = source["model"];
+	        this.hardware = source["hardware"];
+	        this.firmware = source["firmware"];
+	        this.capabilities = source["capabilities"];
+	        this.deep = this.convertValues(source["deep"], DeepPolicy);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class CatalogEntry {
+	    model_id: string;
+	    vendor: string;
+	    model: string;
+	    hardware: string;
+	    profiles: Profile[];
+	
+	    static createFrom(source: any = {}) {
+	        return new CatalogEntry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.model_id = source["model_id"];
+	        this.vendor = source["vendor"];
+	        this.model = source["model"];
+	        this.hardware = source["hardware"];
+	        this.profiles = this.convertValues(source["profiles"], Profile);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
 	export class Error {
 	    code: string;
 	    message: string;
@@ -632,27 +1119,38 @@ export namespace device {
 	        this.new_encrypt_mode = source["new_encrypt_mode"];
 	    }
 	}
-	export class Profile {
-	    id: string;
-	    vendor: string;
-	    model: string;
-	    hardware: string;
-	    firmware: string;
-	    capabilities: string[];
+	
+	export class ProfileMatch {
+	    profile: Profile;
+	    exact: boolean;
 	
 	    static createFrom(source: any = {}) {
-	        return new Profile(source);
+	        return new ProfileMatch(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.id = source["id"];
-	        this.vendor = source["vendor"];
-	        this.model = source["model"];
-	        this.hardware = source["hardware"];
-	        this.firmware = source["firmware"];
-	        this.capabilities = source["capabilities"];
+	        this.profile = this.convertValues(source["profile"], Profile);
+	        this.exact = source["exact"];
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class Target {
 	    host: string;
@@ -677,6 +1175,74 @@ export namespace device {
 
 export namespace guiapi {
 	
+	export class HostKeyRequest {
+	    KnownHostsPath: string;
+	    PinSHA256: string;
+	    AcceptNew: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new HostKeyRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.KnownHostsPath = source["KnownHostsPath"];
+	        this.PinSHA256 = source["PinSHA256"];
+	        this.AcceptNew = source["AcceptNew"];
+	    }
+	}
+	export class GuideRequest {
+	    OperationID: string;
+	    Target: device.Target;
+	    ProfileID: string;
+	    Goals: string[];
+	    AdminPassword: string;
+	    RootPassword: string;
+	    ResetRootPassword: boolean;
+	    Confirmation?: app.GuideConfirmation;
+	    PlanDigest: string;
+	    Confirmed: boolean;
+	    ToolVersion: string;
+	    HostKey: HostKeyRequest;
+	
+	    static createFrom(source: any = {}) {
+	        return new GuideRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.OperationID = source["OperationID"];
+	        this.Target = this.convertValues(source["Target"], device.Target);
+	        this.ProfileID = source["ProfileID"];
+	        this.Goals = source["Goals"];
+	        this.AdminPassword = source["AdminPassword"];
+	        this.RootPassword = source["RootPassword"];
+	        this.ResetRootPassword = source["ResetRootPassword"];
+	        this.Confirmation = this.convertValues(source["Confirmation"], app.GuideConfirmation);
+	        this.PlanDigest = source["PlanDigest"];
+	        this.Confirmed = source["Confirmed"];
+	        this.ToolVersion = source["ToolVersion"];
+	        this.HostKey = this.convertValues(source["HostKey"], HostKeyRequest);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class HistoryEntry {
 	    operation_id: string;
 	    operation: string;
@@ -714,22 +1280,7 @@ export namespace guiapi {
 		    return a;
 		}
 	}
-	export class HostKeyRequest {
-	    KnownHostsPath: string;
-	    PinSHA256: string;
-	    AcceptNew: boolean;
 	
-	    static createFrom(source: any = {}) {
-	        return new HostKeyRequest(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.KnownHostsPath = source["KnownHostsPath"];
-	        this.PinSHA256 = source["PinSHA256"];
-	        this.AcceptNew = source["AcceptNew"];
-	    }
-	}
 	export class OperationRequest {
 	    OperationID: string;
 	    Target: device.Target;
@@ -770,6 +1321,82 @@ export namespace guiapi {
 	        this.AckDeep = source["AckDeep"];
 	        this.ToolVersion = source["ToolVersion"];
 	        this.HostKey = this.convertValues(source["HostKey"], HostKeyRequest);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace state {
+	
+	export class WriteEvidence {
+	    write_started: boolean;
+	    accepted_steps: number;
+	    attempted_macs?: string[];
+	    uncleaned_macs?: string[];
+	    journal_path?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new WriteEvidence(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.write_started = source["write_started"];
+	        this.accepted_steps = source["accepted_steps"];
+	        this.attempted_macs = source["attempted_macs"];
+	        this.uncleaned_macs = source["uncleaned_macs"];
+	        this.journal_path = source["journal_path"];
+	    }
+	}
+	export class Outcome {
+	    schema_version: number;
+	    operation: string;
+	    host?: string;
+	    status: string;
+	    error_code?: string;
+	    device_write_possible: boolean;
+	    write_evidence: WriteEvidence;
+	    // Go type: time
+	    started_at: any;
+	    // Go type: time
+	    finished_at: any;
+	    // Go type: time
+	    acknowledged_at: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new Outcome(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema_version = source["schema_version"];
+	        this.operation = source["operation"];
+	        this.host = source["host"];
+	        this.status = source["status"];
+	        this.error_code = source["error_code"];
+	        this.device_write_possible = source["device_write_possible"];
+	        this.write_evidence = this.convertValues(source["write_evidence"], WriteEvidence);
+	        this.started_at = this.convertValues(source["started_at"], null);
+	        this.finished_at = this.convertValues(source["finished_at"], null);
+	        this.acknowledged_at = this.convertValues(source["acknowledged_at"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

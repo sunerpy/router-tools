@@ -23,11 +23,13 @@ const (
 
 // Event is emitted for CLI rendering and future GUI progress bindings.
 type Event struct {
-	SchemaVersion int       `json:"schema_version"`
-	Operation     string    `json:"operation"`
-	Stage         string    `json:"stage"`
-	Status        string    `json:"status"`
-	Time          time.Time `json:"time"`
+	SchemaVersion int    `json:"schema_version"`
+	Operation     string `json:"operation"`
+	Stage         string `json:"stage"`
+	Status        string `json:"status"`
+	// Step names the guided step an event belongs to; empty outside a guided run.
+	Step string    `json:"step,omitempty"`
+	Time time.Time `json:"time"`
 }
 
 // EventSink receives structured progress. Implementations must not log secrets.
@@ -48,9 +50,13 @@ type AdminVerifier interface {
 // Service owns application flow while protocols remain behind interfaces. The discovery prober only
 // identifies devices; every capability is served by the resolved adapter's own implementation.
 type Service struct {
-	registry  *device.Registry
-	discovery device.Prober
-	locker    OperationLocker
+	registry    *device.Registry
+	discovery   device.Prober
+	locker      OperationLocker
+	outcomes    OutcomeStore
+	clock       func() time.Time
+	backupRoot  string
+	journalRoot string
 }
 
 // NewService wires frontend-independent dependencies.
@@ -61,13 +67,34 @@ func NewService(registry *device.Registry, prober device.Prober) (*Service, erro
 // NewServiceWithLocker wires a cross-process locker in production. prober is the discovery prober: it is
 // only asked to Probe, never type-asserted for capabilities.
 func NewServiceWithLocker(registry *device.Registry, prober device.Prober, locker OperationLocker) (*Service, error) {
+	return NewServiceWithOptions(registry, prober, Options{Locker: locker})
+}
+
+// Options carries the production stores and managed directories. A nil Outcomes store disables the
+// recovery guard and is meant for tests only; both mains always pass one.
+type Options struct {
+	Locker      OperationLocker
+	Outcomes    OutcomeStore
+	BackupRoot  string
+	JournalRoot string
+	Clock       func() time.Time
+}
+
+// NewServiceWithOptions wires the service with explicit stores. prober is the discovery prober.
+func NewServiceWithOptions(registry *device.Registry, prober device.Prober, options Options) (*Service, error) {
 	if registry == nil || prober == nil {
 		return nil, fmt.Errorf("app service requires a registry and prober")
 	}
-	if locker == nil {
-		locker = newLocalLocker()
+	if options.Locker == nil {
+		options.Locker = newLocalLocker()
 	}
-	return &Service{registry: registry, discovery: prober, locker: locker}, nil
+	if options.Clock == nil {
+		options.Clock = func() time.Time { return time.Now().UTC() }
+	}
+	return &Service{
+		registry: registry, discovery: prober, locker: options.Locker, outcomes: options.Outcomes,
+		clock: options.Clock, backupRoot: options.BackupRoot, journalRoot: options.JournalRoot,
+	}, nil
 }
 
 // Catalog lists the registered device models and their exact firmware profiles. It needs no network.

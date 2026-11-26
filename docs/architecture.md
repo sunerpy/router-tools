@@ -10,7 +10,7 @@ cmd/routerctl and future frontends
                 -> reusable protocol, transport, backup, and workflow packages
 ```
 
-Only the composition root wires concrete adapters, through `internal/devices/builtin` (`Adapters()` and `Discovery()`). `internal/app` and `internal/cli` do not import an adapter or the builtin list. A future GUI must call the same typed application services in process; it must not scrape human CLI output or expose a localhost control service.
+Only the composition root `internal/wiring`, used by both mains, wires concrete adapters through `internal/devices/builtin` (`Adapters()` and `Discovery()`), together with the flock locker, the outcome store and the managed directories. `internal/app` and `internal/cli` do not import an adapter or the builtin list. A future GUI must call the same typed application services in process; it must not scrape human CLI output or expose a localhost control service.
 
 ## Exact profiles and capabilities
 
@@ -38,7 +38,9 @@ Telnet incrementally decodes IAC negotiation/subnegotiation and executes marker-
 
 ## Operation state
 
-All changing/backup operations acquire a per-target non-blocking lock before network probing. Production uses flock; the embedded default uses the same non-blocking semantics in process.
+All changing/backup operations acquire a per-router non-blocking lock before network probing. Production uses flock; the embedded default uses the same non-blocking semantics in process. Both lock by `device.RecoveryKey`, the SHA-256 of a versioned prefix plus the canonical host, so neither the management ports nor the spelling of the host select a different lock, outcome record or managed directory.
+
+Every device write is guarded by a write-ahead outcome record (`internal/state`, metadata only). After the lock, resolution and capability checks the use case stores `in_progress` before the first adapter call and its final status before the lock is released. A record that is in progress, partial, unknown, or failed after a possible write blocks every further write of that router with `RECOVERY_REVIEW_REQUIRED` until `AcknowledgeRecovery` records an operator check. Only adapter stage evidence (set before the first write, never cleared) can mark a failure as write-free.
 
 - Enable: Web auth → existing SSH check → fixed commands with attempted-MAC tracking → cleanup → final SSH verification.
 - Soft: conflict/read-only checks → temporary file syntax/hash → atomic install → UCI commit → complete read-back. Removal is limited to the managed path.
@@ -47,6 +49,10 @@ All changing/backup operations acquire a per-target non-blocking lock before net
 - Deep: local backup → online identity/layout/boot → tool/crash checks → journaled crash write → three independently verified reboot transitions and flag checks → soft reinstall → independent final SSH.
 
 A remote write timeout is `unknown`. Accepted writes followed by failure are at least `partial`. Cleanup errors are secondary and never overwrite the primary error.
+
+## Guided flow
+
+`GuidePlan` detects read-only and plans `enable_ssh -> backup -> soft_install -> reboot_verify` for the selected goals; a step whose goal is already in place is skipped. Root evidence comes from password-authenticated SSH only, soft state from the adapter's `SoftInspector`, and backup state from the local managed backup directory. A ready plan carries a secret-free confirmation (target, device identity, profile, goals, reset choice, each step's action and effects) and the SHA-256 of its JSON. `GuideApply` accepts that confirmation only with a matching digest, detects again with the confirmed profile, and allows each step only to keep its action or do less with unchanged effects. It then runs each step through the step's own use case with the confirmed identity, which the use case checks again under the lock, and stops at the first step that does not succeed. The guided flow never uses Telnet and never includes deep persistence or soft-persistence removal.
 
 ## Local integrity and journals
 
@@ -60,7 +66,7 @@ CLI run reports are unique, redacted 0600 JSON documents under `run-dir`; unspec
 
 Typed requests/results/events are shared across frontends. Stable string error codes retain device/transport meaning; CLI maps them to exit codes 0–12 and 130. Human text is not a machine API. JSON stdout contains one report object, with progress on stderr.
 
-Wails discards the return value of a bound method that returns an error. Desktop bindings therefore resolve with the report for failed, partial, and unknown results. A canceled run carries code `CANCELED` and keeps the status its use case assigns. Enable and deep persistence report partial or unknown once a write may have happened, and the UI keeps those statuses with their non-retry warning; the other use cases report failed for every error, so their cancellations show as canceled even after a write. A binding rejects when the call fails before the application runs (for example an invalid password or a duplicate operation ID), or when an error comes with a report that claims success; deep persistence does this if its final journal write fails, and the report then appears only in operation history.
+Wails discards the return value of a bound method that returns an error. Desktop bindings therefore resolve with the report for failed, partial, and unknown results. A canceled run carries code `CANCELED` and keeps the status its use case assigns. Enable and deep persistence report partial or unknown once a write may have happened, and the UI keeps those statuses with their non-retry warning; the other use cases report failed for every error, so their cancellations show as canceled even after a write. A binding rejects when the call fails before the application runs (for example an invalid password or a duplicate operation ID), or when an error comes with a report that claims success; deep persistence does this if its final journal write fails, and the report then appears only in operation history. The same happens when a guarded change succeeds but its final outcome record cannot be stored (`STATE_STORE_FAILED`); the router then stays blocked until the change is acknowledged.
 
 ## Adapter acceptance requirements
 

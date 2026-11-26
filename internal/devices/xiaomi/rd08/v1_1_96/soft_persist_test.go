@@ -4,10 +4,15 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/sunerpy/router-tools/internal/device"
+	"github.com/sunerpy/router-tools/internal/safety/hostkey"
+	"github.com/sunerpy/router-tools/internal/secret"
 	"github.com/sunerpy/router-tools/internal/transport/shell"
 )
 
@@ -192,6 +197,85 @@ func TestSoftRemoveRejectsForeignPath(t *testing.T) {
 	}
 }
 
+// WriteStarted is set before the first device write and never for paths that stop before one.
+func TestSoftWriteEvidence(t *testing.T) {
+	t.Parallel()
+
+	failing := func(existing bool, failCommand string) *fakeCommandShell {
+		remote := softSuccessShell(existing)
+		original := remote.handler
+		remote.handler = func(command string) commandFixture {
+			if command == failCommand {
+				return commandFixture{code: 1}
+			}
+			return original(command)
+		}
+		return remote
+	}
+	cases := []struct {
+		name  string
+		run   func() (bool, error)
+		write bool
+	}{
+		{"install precheck fails", func() (bool, error) {
+			r, err := installSoft(t.Context(), failing(false, "test -f /etc/init.d/dropbear"))
+			return r.WriteStarted, err
+		}, false},
+		{"install conflict", func() (bool, error) {
+			remote := softSuccessShell()
+			original := remote.handler
+			remote.handler = func(command string) commandFixture {
+				if command == "uci -q get firewall.auto_ssh.path" {
+					return commandFixture{stdout: "/user/custom.sh\n"}
+				}
+				return original(command)
+			}
+			r, err := installSoft(t.Context(), remote)
+			return r.WriteStarted, err
+		}, false},
+		{"install already installed", func() (bool, error) {
+			r, err := installSoft(t.Context(), softSuccessShell(true))
+			return r.WriteStarted, err
+		}, false},
+		{"install fails inside the transaction", func() (bool, error) {
+			r, err := installSoft(t.Context(), failing(false, "sh -n "+autoSSHTemp))
+			return r.WriteStarted, err
+		}, true},
+		{"install succeeds", func() (bool, error) {
+			r, err := installSoft(t.Context(), softSuccessShell())
+			return r.WriteStarted, err
+		}, true},
+		{"remove foreign path", func() (bool, error) {
+			remote := softSuccessShell(true)
+			original := remote.handler
+			remote.handler = func(command string) commandFixture {
+				if command == "uci -q get firewall.auto_ssh.path" {
+					return commandFixture{stdout: "/user/custom.sh\n"}
+				}
+				return original(command)
+			}
+			r, err := removeSoft(t.Context(), remote)
+			return r.WriteStarted, err
+		}, false},
+		{"remove not installed", func() (bool, error) {
+			r, err := removeSoft(t.Context(), softSuccessShell())
+			return r.WriteStarted, err
+		}, false},
+		{"remove fails at the UCI delete", func() (bool, error) {
+			r, err := removeSoft(t.Context(), failing(true, "uci delete firewall.auto_ssh && uci commit firewall"))
+			return r.WriteStarted, err
+		}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			started, _ := tc.run()
+			if started != tc.write {
+				t.Fatalf("WriteStarted = %v, want %v", started, tc.write)
+			}
+		})
+	}
+}
+
 func softSuccessShell(existing ...bool) *fakeCommandShell {
 	values := map[string]string{}
 	if len(existing) > 0 && existing[0] {
@@ -243,4 +327,65 @@ func indexContaining(commands []string, fragment string) int {
 		}
 	}
 	return -1
+}
+
+// RebootVerify carries the workflow's write evidence: a reboot that was submitted stays a possible write
+// even when the reconnect then fails, and a failure before the reboot is reported as no write.
+func TestRebootVerifyReportsWhetherTheRebootWasSubmitted(t *testing.T) {
+	t.Parallel()
+
+	rootShell := func() *fakeCommandShell {
+		soft := softSuccessShell(true)
+		return &fakeCommandShell{handler: func(command string) commandFixture {
+			switch command {
+			case "id -u":
+				return commandFixture{stdout: "0\n"}
+			case "cat /proc/sys/kernel/random/boot_id":
+				return commandFixture{stdout: "00000000-0000-0000-0000-000000000001\n"}
+			}
+			return soft.handler(command)
+		}}
+	}
+	password, _ := secret.NewPassword("root")
+
+	t.Run("reboot submitted, then the host key changed", func(t *testing.T) {
+		t.Parallel()
+		first := rootShell()
+		prober := NewProber(func(context.Context, string, int) device.PortState { return device.PortClosed })
+		prober.sleep = func(time.Duration) {}
+		dials := 0
+		prober.sshDial = func(context.Context, device.Target, secret.Password, hostkey.Policy) (shell.Shell, error) {
+			dials++
+			if dials == 1 {
+				return first, nil
+			}
+			return nil, &device.Error{Code: device.CodeHostKeyMismatch, Message: "host key changed"}
+		}
+		result, err := prober.RebootVerify(t.Context(), device.DefaultTarget(), password, hostkey.Policy{}, false)
+		var deviceErr *device.Error
+		if !errors.As(err, &deviceErr) || deviceErr.Code != device.CodeHostKeyMismatch || !result.WriteStarted {
+			t.Fatalf("RebootVerify() = %+v, %v; want HOST_KEY_MISMATCH with the reboot recorded as submitted", result, err)
+		}
+		if countCommand(first.commands, "reboot") != 1 {
+			t.Fatalf("commands = %v, want exactly one reboot", first.commands)
+		}
+	})
+	t.Run("soft check fails before the reboot", func(t *testing.T) {
+		t.Parallel()
+		broken := &fakeCommandShell{handler: func(command string) commandFixture {
+			if command == "id -u" {
+				return commandFixture{stdout: "0\n"}
+			}
+			return commandFixture{code: 1}
+		}}
+		prober := NewProber(func(context.Context, string, int) device.PortState { return device.PortClosed })
+		prober.sleep = func(time.Duration) {}
+		prober.sshDial = func(context.Context, device.Target, secret.Password, hostkey.Policy) (shell.Shell, error) {
+			return broken, nil
+		}
+		result, err := prober.RebootVerify(t.Context(), device.DefaultTarget(), password, hostkey.Policy{}, false)
+		if err == nil || result.WriteStarted || countCommand(broken.commands, "reboot") != 0 {
+			t.Fatalf("RebootVerify() = %+v, %v, commands %v; want a failure with no reboot", result, err, broken.commands)
+		}
+	})
 }

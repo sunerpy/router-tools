@@ -35,10 +35,14 @@ const (
 	CodeDeepAckRequired       = "DEEP_ACK_REQUIRED"
 	CodeDeepJournalExists     = "DEEP_JOURNAL_EXISTS"
 	CodeOperationLocked       = "OPERATION_LOCKED"
-	CodeTelnetAuthFailed      = "TELNET_AUTH_FAILED"
-	CodeTelnetUnreachable     = "TELNET_UNREACHABLE"
-	CodeCanceled              = "CANCELED"
-	CodeInternalError         = "INTERNAL_ERROR"
+	// CodeRecoveryReviewRequired blocks a device change after an uncertain one until it is acknowledged.
+	CodeRecoveryReviewRequired = "RECOVERY_REVIEW_REQUIRED"
+	// CodeStateStoreFailed means the write-ahead outcome record could not be read or stored.
+	CodeStateStoreFailed  = "STATE_STORE_FAILED"
+	CodeTelnetAuthFailed  = "TELNET_AUTH_FAILED"
+	CodeTelnetUnreachable = "TELNET_UNREACHABLE"
+	CodeCanceled          = "CANCELED"
+	CodeInternalError     = "INTERNAL_ERROR"
 )
 
 // Error is a stable, frontend-independent device error.

@@ -124,7 +124,14 @@ func TestDeepRejectsExistingJournalBeforeAdapter(t *testing.T) {
 func makeDeepBackupFixture(t *testing.T, profileID string) string {
 	t.Helper()
 	directory := t.TempDir()
-	if err := os.Mkdir(filepath.Join(directory, "partitions"), 0o700); err != nil {
+	writeBackupAt(t, directory, backup.DeviceIdentity{DeviceID: "DEVICE", Hardware: "RD08", ROMVersion: "1.1.96", Profile: profileID})
+	return directory
+}
+
+// writeBackupAt writes a complete backup that passes backup.Verify into directory, creating it when needed.
+func writeBackupAt(t *testing.T, directory string, identity backup.DeviceIdentity) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(directory, "partitions"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	mtdText := "dev: size erasesize name\nmtd0: 00000004 00020000 \"boot\"\n"
@@ -140,7 +147,7 @@ func makeDeepBackupFixture(t *testing.T, profileID string) string {
 	}
 	manifest := backup.Manifest{
 		SchemaVersion: 1, ToolVersion: "test", CreatedAt: time.Now().UTC(), Complete: true,
-		Device: backup.DeviceIdentity{DeviceID: "DEVICE", Hardware: "RD08", ROMVersion: "1.1.96", Profile: profileID},
+		Device: identity,
 		BootID: "00000000-0000-0000-0000-000000000001", MTDTextFile: "mtd.txt",
 		Partitions: []backup.Partition{{Index: 0, Name: "boot", Size: 4, EraseSize: 0x20000, Source: "/dev/mtd0", File: "partitions/mtd00_boot.bin", SHA256: fmt.Sprintf("%x", sha256.Sum256(partitionData))}},
 	}
@@ -161,5 +168,4 @@ func makeDeepBackupFixture(t *testing.T, profileID string) string {
 	if err := os.WriteFile(filepath.Join(directory, "SHA256SUMS"), []byte(sums.String()), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return directory
 }

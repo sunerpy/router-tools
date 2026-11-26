@@ -377,6 +377,10 @@ func operationStatus(report any) string {
 		return value.Status
 	case app.DeepReport:
 		return value.Status
+	case app.GuideApplyReport:
+		return value.Status
+	case app.GuidePlanReport:
+		return value.Status
 	default:
 		return ""
 	}
@@ -436,6 +440,10 @@ func renderOperationHuman(writer io.Writer, report any) error {
 			}
 		}
 		return renderOperationError(writer, value.Error)
+	case app.GuidePlanReport:
+		return renderGuidePlan(writer, value)
+	case app.GuideApplyReport:
+		return renderGuideApply(writer, value)
 	default:
 		return fmt.Errorf("unknown operation report type %T", report)
 	}

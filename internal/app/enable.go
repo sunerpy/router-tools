@@ -7,6 +7,7 @@ import (
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 	"github.com/sunerpy/router-tools/internal/secret"
+	"github.com/sunerpy/router-tools/internal/state"
 )
 
 const (
@@ -47,6 +48,8 @@ type EnableRequest struct {
 	RootPassword  secret.Password
 	HostKeyPolicy hostkey.Policy
 	Confirmed     bool
+	// ExpectedIdentity, set by a guided run, must match the device after the lock is taken.
+	ExpectedIdentity *ConfirmedIdentity
 }
 
 // EnableReport is safe for CLI/GUI rendering after error redaction.
@@ -128,8 +131,24 @@ func (s *Service) EnableSSH(ctx context.Context, request EnableRequest, events E
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected prober does not support SSH enable"})
 	}
+	if err := checkExpectedIdentity(request.ExpectedIdentity, probe.Observation, report.Profile); err != nil {
+		return fail(err)
+	}
+	guard, err := s.beginWrite(request.Target, "enable", state.WriteEvidence{})
+	if err != nil {
+		return fail(err)
+	}
 	emit("enable", "running")
 	result, err := enabler.EnableSSH(ctx, request.Target, request.AdminPassword, request.RootPassword, request.HostKeyPolicy)
+	finish := func(final EnableReport, finalErr error) (EnableReport, error) {
+		writePossible := result.AcceptedSteps > 0 || len(result.AttemptedMACs) > 0 ||
+			final.Status == StatusPartial || final.Status == StatusUnknown
+		evidence := state.WriteEvidence{
+			WriteStarted: result.AcceptedSteps > 0 || len(result.AttemptedMACs) > 0, AcceptedSteps: result.AcceptedSteps,
+			AttemptedMACs: result.AttemptedMACs, UncleanedMACs: uncleanedMACs(result.Cleanup),
+		}
+		return settleReport(guard, &final, final.Status, writePossible, evidence, finalErr, func(e *device.Error) { final.Error = e })
+	}
 	report.Status = result.Status
 	report.Outcome = result.Outcome
 	report.AcceptedSteps = result.AcceptedSteps
@@ -148,17 +167,28 @@ func (s *Service) EnableSSH(ctx context.Context, request EnableRequest, events E
 				report.Status = StatusFailed
 			}
 		}
-		return fail(err)
+		return finish(fail(err))
 	}
 	if !result.SSHVerified {
 		if report.Status == StatusSucceeded {
 			report.Status = StatusFailed
 		}
-		return fail(&device.Error{Code: device.CodeRootVerifyFailed, Message: "enable did not produce a verified SSH root login"})
+		return finish(fail(&device.Error{Code: device.CodeRootVerifyFailed, Message: "enable did not produce a verified SSH root login"}))
 	}
 	if report.Status == "" {
 		report.Status = StatusSucceeded
 	}
 	emit("completed", report.Status)
-	return report, nil
+	return finish(report, nil)
+}
+
+// uncleanedMACs lists the temporary MAC rules whose removal did not succeed.
+func uncleanedMACs(cleanup []CleanupResult) []string {
+	var macs []string
+	for _, entry := range cleanup {
+		if !entry.Success {
+			macs = append(macs, entry.MAC)
+		}
+	}
+	return macs
 }

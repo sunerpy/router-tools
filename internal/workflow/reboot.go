@@ -23,11 +23,13 @@ type RebootConfig struct {
 	OnlineTimeout time.Duration
 }
 
-// RebootResult records the observed boot transition and new verified shell.
+// RebootResult records the observed boot transition and new verified shell. WriteStarted is set before
+// the reboot command is sent and stays set for every failure after it.
 type RebootResult struct {
-	OldBootID string
-	NewBootID string
-	Shell     shell.Shell
+	OldBootID    string
+	NewBootID    string
+	Shell        shell.Shell
+	WriteStarted bool
 }
 
 // ReadBootID reads and validates a canonical UUID.
@@ -63,6 +65,7 @@ func RebootAndWait(ctx context.Context, remote shell.Shell, config RebootConfig)
 	if config.PortsDown == nil || config.Connect == nil {
 		return result, &device.Error{Code: device.CodeInternalError, Message: "reboot connectivity probes are not configured"}
 	}
+	result.WriteStarted = true
 	commandResult, rebootErr := remote.Run(ctx, "reboot", shell.RunOptions{})
 	_ = remote.Close()
 	if rebootErr != nil {

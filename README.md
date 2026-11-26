@@ -14,19 +14,23 @@
 - SSH password authentication, TOFU/pinned host keys, bounded concurrent stdout/stderr reads, and binary streaming.
 - Telnet negotiation and marker-framed commands for explicitly permitted fallback paths.
 - `doctor` with optional Web-admin and root verification.
+- `setup`: read-only detection, a plan of only the missing steps (SSH, backup, soft persistence, optional reboot verification), one confirmation listing every write, and a run that detects again, refuses a plan that would write more or differently, and stops at the first failed step.
 - Fixed three-step SSH enable with attempted-MAC tracking, cleanup, and final SSH root evidence.
 - Soft persistence install/read-back verification/idempotency/removal.
 - Reboot state machine using disconnect observation and changed canonical `boot_id`.
 - Streaming MTD backup, local integrity verification, and optional online identity/layout/boot comparison.
 - High-risk deep persistence with dedicated acknowledgement, verified backup, online layout check, operation lock, three-reboot journal, and final independent SSH verification.
-- Strict non-secret JSON configuration, per-target flock, private run reports, human and single-object JSON output.
+- Strict non-secret JSON configuration, per-router flock, private run reports, human and single-object JSON output.
+- A write-ahead recovery record per router that blocks further changes after an uncertain one until `recovery ack`.
 
 ## Command tree
 
 ```text
 routerctl
 ├── version
+├── profiles
 ├── doctor [--with-admin-auth] [--with-root-verify]
+├── setup [--goal ssh,backup,soft[,reboot]] [--reset-root-password] [--plan-only]
 ├── verify [--transport ssh|telnet|auto]
 ├── enable
 ├── persist
@@ -34,9 +38,11 @@ routerctl
 │   └── remove
 ├── reboot-verify
 ├── backup
-│   ├── create --output <new-directory>
+│   ├── create [--output <new-directory>]
 │   └── verify --dir <directory> [--online]
-└── deep-persist --backup-dir <verified-directory>
+├── deep-persist --backup-dir <verified-directory>
+└── recovery
+    └── ack
 ```
 
 Run `routerctl <command> --help` for command flags. See [docs/usage.md](docs/usage.md) for secret input and examples.
@@ -115,7 +121,7 @@ Local artifacts are under `cmd/routergui/build/bin/`. `scripts/package-gui.sh wi
 - Passwords are never accepted as literal CLI arguments or environment variables. Use a hidden prompt or pipe exactly the required lines from an approved secret provider.
 - An open TCP port is not authentication evidence. SSH success requires password authentication plus exact `id -u == 0`.
 - Unknown or changed SSH host keys fail closed. A host-key mismatch never falls back to Telnet.
-- Device changes require exact profile compatibility and a per-target non-blocking operation lock.
+- Device changes require exact profile compatibility and a per-router non-blocking operation lock. Each change is recorded before its first write; after a partial, unknown or interrupted change, further changes are refused until you check the router and run `routerctl recovery ack`.
 - `--yes` confirms ordinary changes only. Deep persistence additionally requires `--allow-telnet`, a verified current-boot backup, and the resolved profile's exact acknowledgement (`RD08-DEEP` for RD08 1.1.96). `routerctl profiles` lists the supported models and firmware.
 - A deep write timeout is `unknown`, not a retryable failure. Existing deep journals block blind restart.
 - There is no automatic restore, automatic rescue, generic remote-shell command, or arbitrary script profile mechanism.

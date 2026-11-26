@@ -59,9 +59,7 @@ func (s *Service) BackupVerifyOnline(ctx context.Context, request BackupOnlineVe
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "online backup verification is unavailable"})
 	}
 	observation := probe.Observation
-	if observation.Hardware == "" {
-		observation.Hardware = adapter.Profile().Hardware
-	}
+	observation.Hardware = backupIdentity(probe.Observation, adapter.Profile()).Hardware
 	if err := verifier.VerifyBackupOnline(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, manifest, observation, adapter.Profile().ID); err != nil {
 		return fail(err)
 	}

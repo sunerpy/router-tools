@@ -41,6 +41,8 @@ type DeepResult struct {
 	Transitions      []BootTransition `json:"transitions,omitempty"`
 	FinalSSHVerified bool             `json:"final_ssh_verified"`
 	SoftVerified     bool             `json:"soft_verified"`
+	// WriteStarted is set before the first crash-partition write.
+	WriteStarted bool `json:"write_started"`
 }
 
 // DeepPersister implements the exact RD08 three-reboot state machine.

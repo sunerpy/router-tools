@@ -3,17 +3,13 @@ package main
 import (
 	"embed"
 	"log"
-	"os"
-	"path/filepath"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
 
 	"github.com/sunerpy/router-tools/internal/app"
-	"github.com/sunerpy/router-tools/internal/device"
-	"github.com/sunerpy/router-tools/internal/devices/builtin"
-	"github.com/sunerpy/router-tools/internal/safety/oplock"
+	"github.com/sunerpy/router-tools/internal/wiring"
 )
 
 //go:embed all:frontend/dist
@@ -41,14 +37,9 @@ func main() {
 }
 
 func newApplicationService() (*app.Service, error) {
-	registry, err := device.NewRegistry(builtin.Adapters()...)
+	paths, err := wiring.DefaultPaths()
 	if err != nil {
 		return nil, err
 	}
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		configDir = "."
-	}
-	locker := oplock.FlockLocker{Dir: filepath.Join(configDir, "routerctl", "locks")}
-	return app.NewServiceWithLocker(registry, builtin.Discovery(), locker)
+	return wiring.NewService(paths)
 }

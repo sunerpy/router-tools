@@ -34,3 +34,30 @@ func TestFlockLockerIsNonBlockingAndReleases(t *testing.T) {
 	}
 	_ = releaseAgain()
 }
+
+func TestFlockLockerIgnoresManagementPorts(t *testing.T) {
+	t.Parallel()
+
+	locker := oplock.FlockLocker{Dir: t.TempDir()}
+	release, err := locker.Acquire(device.DefaultTarget())
+	if err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+	defer func() { _ = release() }()
+	for name, target := range map[string]device.Target{
+		"web port":    {Host: "192.168.31.1", WebPort: 8080, SSHPort: 22, TelnetPort: 23},
+		"ssh port":    {Host: "192.168.31.1", WebPort: 80, SSHPort: 2222, TelnetPort: 23},
+		"telnet port": {Host: "192.168.31.1", WebPort: 80, SSHPort: 22, TelnetPort: 2323},
+	} {
+		_, err := locker.Acquire(target)
+		var deviceErr *device.Error
+		if !errors.As(err, &deviceErr) || deviceErr.Code != device.CodeOperationLocked {
+			t.Fatalf("%s: Acquire() error = %v, want OPERATION_LOCKED for the same router", name, err)
+		}
+	}
+	other, err := locker.Acquire(device.Target{Host: "192.168.31.2", WebPort: 80, SSHPort: 22, TelnetPort: 23})
+	if err != nil {
+		t.Fatalf("Acquire(other router) error = %v", err)
+	}
+	_ = other()
+}

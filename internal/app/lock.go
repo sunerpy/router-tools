@@ -1,13 +1,12 @@
 package app
 
 import (
-	"fmt"
 	"sync"
 
 	"github.com/sunerpy/router-tools/internal/device"
 )
 
-// OperationLocker prevents concurrent operations against one target.
+// OperationLocker prevents concurrent operations against one router, whatever its management ports.
 type OperationLocker interface {
 	Acquire(device.Target) (release func() error, err error)
 }
@@ -22,7 +21,7 @@ func newLocalLocker() *localLocker {
 }
 
 func (l *localLocker) Acquire(target device.Target) (func() error, error) {
-	key := fmt.Sprintf("%s|%d|%d|%d", target.Host, target.WebPort, target.SSHPort, target.TelnetPort)
+	key := device.RecoveryKey(target)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if _, exists := l.held[key]; exists {

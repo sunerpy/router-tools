@@ -67,6 +67,7 @@ func installSoft(ctx context.Context, remote shell.Shell) (app.SoftResult, error
 	}
 
 	encoded := base64.StdEncoding.EncodeToString([]byte(autoSSHScript))
+	result.WriteStarted = true
 	transaction := []string{
 		"mkdir -p /data/auto_ssh",
 		"printf '%s' '" + encoded + "' | base64 -d > " + autoSSHTemp,
@@ -140,6 +141,7 @@ func removeSoft(ctx context.Context, remote shell.Shell) (app.SoftResult, error)
 	if strings.TrimSpace(string(pathResult.Stdout)) != autoSSHPath {
 		return result, &device.Error{Code: device.CodeSoftConfigConflict, Message: "refusing to remove a foreign firewall include path"}
 	}
+	result.WriteStarted = true
 	for _, command := range []string{
 		"uci delete firewall.auto_ssh && uci commit firewall",
 		"rm -f " + autoSSHPath + " " + autoSSHTemp,

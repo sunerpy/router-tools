@@ -74,6 +74,21 @@ func (a *App) DeepPersist(request guiapi.OperationRequest) (app.DeepReport, erro
 }
 
 // Catalog lists the registered device models and their exact firmware profiles.
+// GuidePlan detects the router and returns the guided plan without changing it.
+func (a *App) GuidePlan(request guiapi.GuideRequest) (app.GuidePlanReport, error) {
+	return a.service.GuidePlan(a.ctx, request)
+}
+
+// GuideApply runs a confirmed guided plan.
+func (a *App) GuideApply(request guiapi.GuideRequest) (app.GuideApplyReport, error) {
+	return a.service.GuideApply(a.ctx, request)
+}
+
+// AcknowledgeRecovery records that the router was checked after an uncertain change.
+func (a *App) AcknowledgeRecovery(request guiapi.OperationRequest) (app.RecoveryReport, error) {
+	return a.service.AcknowledgeRecovery(a.ctx, request)
+}
+
 func (a *App) Catalog() []device.CatalogEntry { return a.service.Catalog() }
 
 func (a *App) Cancel(operationID string) bool              { return a.service.Cancel(operationID) }

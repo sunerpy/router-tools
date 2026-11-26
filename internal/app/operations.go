@@ -2,11 +2,14 @@ package app
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 
 	"github.com/sunerpy/router-tools/internal/backup"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 	"github.com/sunerpy/router-tools/internal/secret"
+	"github.com/sunerpy/router-tools/internal/state"
 )
 
 // SoftPersistence implements adapter-specific soft install/remove transactions.
@@ -33,6 +36,8 @@ type SoftRequest struct {
 	HostKeyPolicy hostkey.Policy
 	AllowTelnet   bool
 	Confirmed     bool
+	// ExpectedIdentity, set by a guided run, must match the device after the lock is taken.
+	ExpectedIdentity *ConfirmedIdentity
 }
 
 // SoftReport wraps installation evidence without claiming reboot verification.
@@ -110,8 +115,18 @@ func (s *Service) softOperation(ctx context.Context, request SoftRequest, events
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "soft persistence is unavailable"})
 	}
+	if err := checkExpectedIdentity(request.ExpectedIdentity, probe.Observation, report.Profile); err != nil {
+		return fail(err)
+	}
+	guard, err := s.beginWrite(request.Target, operation, state.WriteEvidence{})
+	if err != nil {
+		return fail(err)
+	}
 	emit("soft", "running")
 	var result SoftResult
+	finish := func(final SoftReport, finalErr error) (SoftReport, error) {
+		return settleReport(guard, &final, final.Status, result.WriteStarted, state.WriteEvidence{WriteStarted: result.WriteStarted}, finalErr, func(e *device.Error) { final.Error = e })
+	}
 	if remove {
 		result, err = provider.RemoveSoft(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, request.AllowTelnet)
 	} else {
@@ -119,14 +134,14 @@ func (s *Service) softOperation(ctx context.Context, request SoftRequest, events
 	}
 	report.Result = result
 	if err != nil {
-		return fail(err)
+		return finish(fail(err))
 	}
 	if !result.Verified {
-		return fail(&device.Error{Code: device.CodeRemoteCommandFailed, Message: "soft operation did not pass read-back verification"})
+		return finish(fail(&device.Error{Code: device.CodeRemoteCommandFailed, Message: "soft operation did not pass read-back verification"}))
 	}
 	report.Status = StatusSucceeded
 	emit("completed", StatusSucceeded)
-	return report, nil
+	return finish(report, nil)
 }
 
 // RebootVerify verifies a new boot_id, final SSH root, and soft configuration.
@@ -166,18 +181,28 @@ func (s *Service) RebootVerify(ctx context.Context, request SoftRequest, events 
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "reboot verification is unavailable"})
 	}
-	emit("reboot", "running")
-	result, err := verifier.RebootVerify(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, request.AllowTelnet)
-	report.Result = result
+	if err := checkExpectedIdentity(request.ExpectedIdentity, probe.Observation, report.Profile); err != nil {
+		return fail(err)
+	}
+	guard, err := s.beginWrite(request.Target, "reboot-verify", state.WriteEvidence{})
 	if err != nil {
 		return fail(err)
 	}
+	emit("reboot", "running")
+	result, err := verifier.RebootVerify(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, request.AllowTelnet)
+	report.Result = result
+	finish := func(final RebootReport, finalErr error) (RebootReport, error) {
+		return settleReport(guard, &final, final.Status, result.WriteStarted, state.WriteEvidence{WriteStarted: result.WriteStarted}, finalErr, func(e *device.Error) { final.Error = e })
+	}
+	if err != nil {
+		return finish(fail(err))
+	}
 	if !result.SSHVerified || !result.SoftVerified || result.NewBootID == result.OldBootID {
-		return fail(&device.Error{Code: device.CodeRebootTimeout, Message: "reboot verification evidence is incomplete"})
+		return finish(fail(&device.Error{Code: device.CodeRebootTimeout, Message: "reboot verification evidence is incomplete"}))
 	}
 	report.Status = StatusSucceeded
 	emit("completed", StatusSucceeded)
-	return report, nil
+	return finish(report, nil)
 }
 
 // BackupCreateRequest controls one new backup directory.
@@ -188,6 +213,8 @@ type BackupCreateRequest struct {
 	HostKeyPolicy hostkey.Policy
 	OutputDir     string
 	ToolVersion   string
+	// ExpectedIdentity, set by a guided run, must match the device after the lock is taken.
+	ExpectedIdentity *ConfirmedIdentity
 }
 
 // BackupCreateReport includes the completed manifest only on success.
@@ -222,7 +249,7 @@ func (s *Service) BackupCreate(ctx context.Context, request BackupCreateRequest,
 	if err := request.RootPassword.Validate(); err != nil {
 		return fail(err)
 	}
-	if request.OutputDir == "" {
+	if request.OutputDir == "" && s.backupRoot == "" {
 		return fail(&device.Error{Code: device.CodeInvalidArgument, Message: "backup output directory is required"})
 	}
 	if err := s.checkProfileID(request.ProfileID); err != nil {
@@ -246,20 +273,22 @@ func (s *Service) BackupCreate(ctx context.Context, request BackupCreateRequest,
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "backup is unavailable"})
 	}
-	emit("backup", "running")
-	hardware := probe.Observation.Hardware
-	if hardware == "" {
-		hardware = report.Profile.Hardware
+	if err := checkExpectedIdentity(request.ExpectedIdentity, probe.Observation, report.Profile); err != nil {
+		return fail(err)
 	}
+	outputDir := request.OutputDir
+	if outputDir == "" {
+		outputDir = filepath.Join(s.managedBackupDir(request.Target, report.Profile), s.clock().UTC().Format(managedStampLayout))
+		if err := os.MkdirAll(filepath.Dir(outputDir), 0o700); err != nil {
+			return fail(err)
+		}
+		report.OutputDir = outputDir
+	}
+	emit("backup", "running")
 	manifest, err := creator.CreateBackup(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, backup.CreateOptions{
-		OutputDir:   request.OutputDir,
+		OutputDir:   outputDir,
 		ToolVersion: request.ToolVersion,
-		Device: backup.DeviceIdentity{
-			DeviceID:   probe.Observation.DeviceID,
-			Hardware:   hardware,
-			ROMVersion: probe.Observation.ROMVersion,
-			Profile:    report.Profile.ID,
-		},
+		Device:      backupIdentity(probe.Observation, report.Profile),
 	})
 	if err != nil {
 		return fail(err)
@@ -267,7 +296,7 @@ func (s *Service) BackupCreate(ctx context.Context, request BackupCreateRequest,
 	if !manifest.Complete {
 		return fail(&device.Error{Code: device.CodeBackupIncomplete, Message: "adapter returned an incomplete backup manifest"})
 	}
-	if err := backup.Verify(request.OutputDir); err != nil {
+	if err := backup.Verify(outputDir); err != nil {
 		return fail(err)
 	}
 	report.Manifest = &manifest
