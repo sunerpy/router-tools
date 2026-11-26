@@ -64,6 +64,7 @@ acknowledgement, forgetting saved passwords and Telnet are never offered. See RI
 			return err
 		},
 	})
+	addMCPConfigCommand(command, options)
 	root.AddCommand(command)
 }
 

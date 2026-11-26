@@ -195,6 +195,21 @@ routerctl mcp --http 0.0.0.0:18731 --token-file ~/.config/routerctl/mcp.token   
 - stdout carries only MCP messages; warnings and one JSON audit line per tool call and per finished operation go to stderr.
 - Exit codes: `0` after a clean stop (SIGINT, SIGTERM, or the end of input over stdio), `2` for invalid flags, address or token, `10` when an operation was still running at exit (stderr names it), `12` when listening or serving fails. A stop cancels running operations and ends waiting calls at once.
 
+### Agent hosts and the skill
+
+```bash
+routerctl mcp config --agent claude-code                       # stdio entry for the host, plus its add command
+routerctl mcp config --agent pi --http http://127.0.0.1:18731/mcp
+routerctl skill install --agent codex                          # ~/.agents/skills/router-tools
+routerctl skill install --dir ~/skills-export                   # any directory; the skill goes to <dir>/router-tools
+routerctl skill show                                           # print SKILL.md
+```
+
+- `mcp config` prints the snippet, the file it belongs in and, where the host has one, its own add command. It writes nothing and names this `routerctl` by its absolute path. Agent IDs: `claude-code`, `codex`, `opencode`, `pi`, `dsh`, `workbuddy`, `generic`; `--http` is refused for `workbuddy`, which documents only stdio servers.
+- `skill install --agent` knows the directories of `claude-code` (`~/.claude/skills`, or `$CLAUDE_CONFIG_DIR/skills`) and of `codex`, `opencode`, `pi` and `dsh` (`~/.agents/skills`; for dsh `$DSH_AGENTS_HOME/skills` when set); `workbuddy` and `generic` need `--dir`. An identical installed copy is left alone; a changed one is replaced only with `--force`, which rewrites the skill's own files and keeps others. Exit 9 refuses a symbolic link or non-directory at `<dir>/router-tools` or at a directory the install creates inside it, and a symbolic link or directory where it writes a file; `<dir>` itself may be a symbolic link. Other special files (a named pipe, for example) count as changed and are replaced with `--force`. Other file-system errors exit 12.
+- `mcp config` prints the moved file when a host's documented variable is set (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `OPENCODE_CONFIG_DIR` or `XDG_CONFIG_HOME` for opencode, `PI_CODING_AGENT_DIR`, `DSH_HOME`). For Codex on Linux with `XDG_CONFIG_HOME` set to a directory other than `$HOME/.config`, the entry also sets that variable, because Codex does not pass it to stdio servers and routerctl would otherwise use other locks, recovery records, known hosts and saved passwords.
+- Per-host details, approvals, timeouts and troubleshooting: [agents.md](agents.md).
+
 ## Output and exit codes
 
 Human reports go to stdout; progress and warnings go to stderr. `--json` emits one JSON report object on stdout, including failed operations where a report is available. Run reports are unique 0600 JSON files under `run-dir`; deep operations additionally write the stable-stage journal.
