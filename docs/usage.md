@@ -73,6 +73,43 @@ routerctl verify --transport auto --allow-telnet
 
 `verify --transport telnet --allow-telnet` proves only Telnet root access. It does not set `ssh_verified=true`.
 
+## Guided setup
+
+```bash
+routerctl setup --plan-only                    # detect and show the plan; changes nothing
+routerctl setup                                # detect, ask only for what is missing, confirm once, apply
+routerctl setup --goal ssh,backup,soft,reboot  # also prove soft persistence across one reboot
+routerctl setup --reset-root-password          # SSH is open but the current root password is unknown
+```
+
+`setup` detects the router read-only, then plans the steps `enable_ssh`, `backup`, `soft_install` and `reboot_verify` for the selected goals (default `ssh,backup,soft`; `ssh` is always included and `reboot` requires `soft`). A step whose goal is already in place is skipped: SSH root already works, a verified managed backup exists, or the soft persistence is installed and verified. It prompts only for what the plan needs:
+
+- SSH closed: the Web admin password and the new root password, twice.
+- SSH open: the current root password. When it is rejected, `setup` does not reset it; pass `--reset-root-password` to let the enable flow set a new one, and that change is listed in the confirmation.
+
+The confirmation lists every planned write and its effect. `--yes` replaces the typed `yes`. The run detects again first. If that detection fails, it stops with the detection's own error (for example `UNSUPPORTED_FIRMWARE`, exit 5, after a firmware change). If the device identity changed or a step would do more or something else than you confirmed, it stops with `CONFIRMATION_REQUIRED` (exit 9). Both happen before any write; run `setup` again then. It stops at the first step that does not succeed and exits with that step's code. Nothing is retried. Soft persistence that drifted or conflicts is reported with the separate maintenance it needs (`persist remove`, or a manual check) and is never removed by `setup`. Deep persistence is never part of `setup`.
+
+Non-interactive use reads the passwords with `--admin-password-stdin` (first line) and `--root-password-stdin` (next line) and needs `--yes`. With nothing to do, `setup` prints `Nothing to do` and exits 0 without asking for a confirmation.
+
+## Recovery acknowledgement
+
+```bash
+routerctl recovery ack
+```
+
+After a change ended `partial` or `unknown`, failed after a write may have been submitted, or stopped without a final record, every further change of that router fails with `RECOVERY_REVIEW_REQUIRED` (exit 9). Check the router as `RECOVERY.md` describes, then acknowledge; `--yes` replaces the typed confirmation. The record is kept and blocks again after the next uncertain change.
+
+## Managed directories
+
+| Purpose                         | Location                                                       |
+| ------------------------------- | -------------------------------------------------------------- |
+| Recovery records                | `<user config dir>/routerctl/state/`                           |
+| Target locks                    | `<user config dir>/routerctl/locks/`                           |
+| Deep journals without a run dir | `<user config dir>/routerctl/deep/<model>/<host>-<key>/`       |
+| Backups without `--output`      | `<home>/RouterTools/backups/<model>/<host>-<key>/<UTC stamp>/` |
+
+`<host>` is the canonical host (IP literals normalized, host names in lower case) and `<key>` the first 12 hex characters of the router's port-independent recovery key, so changing a management port or the spelling of the host never selects another lock, record or directory. A journal in a custom `--run-dir`, or written by the desktop deep flow, is found only in that directory; check it before another deep attempt.
+
 ## Temporary SSH enable
 
 ```bash
@@ -96,12 +133,13 @@ Installation verifies file permissions, syntax, SHA-256, and all four UCI values
 ## Backup
 
 ```bash
+routerctl backup create                       # new directory under the managed backup root
 routerctl backup create --output /new/nonexistent/backup-directory
 routerctl backup verify --dir /new/nonexistent/backup-directory
 routerctl backup verify --dir /new/nonexistent/backup-directory --online
 ```
 
-The output directory must not already exist. Creation requires SSH root and streams each MTD node with exact size and SHA-256 verification. Local verify checks manifest schema, paths, regular files, exact sizes, hashes, MTD layout, and complete sorted `SHA256SUMS` coverage.
+An explicit output directory must not already exist; without `--output` a new time-stamped directory is created under the managed backup root. Creation requires SSH root and streams each MTD node with exact size and SHA-256 verification. Local verify checks manifest schema, paths, regular files, exact sizes, hashes, MTD layout, and complete sorted `SHA256SUMS` coverage.
 
 `--online` additionally compares device identity, full layout, and unchanged `boot_id` through read-only SSH commands.
 
@@ -116,26 +154,26 @@ routerctl \
   deep-persist
 ```
 
-Read `RISKS.md` and `RECOVERY.md` first. The acknowledgement is the resolved profile's own phrase (`RD08-DEEP` for `xiaomi-rd08-1.1.96`); the interactive prompt shows it, and when registered profiles use different phrases it asks for `--profile` or `--ack-deep`. `--yes` has no effect on this dedicated acknowledgement. An existing `<host>-deep.json` in the run directory blocks the operation. Do not rename an old journal merely to bypass the safety gate.
+Read `RISKS.md` and `RECOVERY.md` first. The acknowledgement is the resolved profile's own phrase (`RD08-DEEP` for `xiaomi-rd08-1.1.96`); the interactive prompt shows it, and when registered profiles use different phrases it asks for `--profile` or `--ack-deep`. `--yes` has no effect on this dedicated acknowledgement. An existing `<host>-deep.json` in the run directory blocks the operation. Without `--run-dir` the journal lives in the router's managed deep directory, so a retry with other ports still meets it. Do not rename an old journal merely to bypass the safety gate.
 
 ## Output and exit codes
 
 Human reports go to stdout; progress and warnings go to stderr. `--json` emits one JSON report object on stdout, including failed operations where a report is available. Run reports are unique 0600 JSON files under `run-dir`; deep operations additionally write the stable-stage journal.
 
-| Exit | Meaning                                                                |
-| ---: | ---------------------------------------------------------------------- |
-|    0 | All required evidence passed or the exact target state already existed |
-|    2 | CLI/configuration/password validation                                  |
-|    3 | Network/transport/protocol connection failure                          |
-|    4 | Web/SSH/Telnet authentication failure                                  |
-|    5 | Device/profile/capability/host-key compatibility failure               |
-|    6 | Device API explicitly rejected a request                               |
-|    7 | Remote command or tool failure                                         |
-|    8 | Final state/root/reboot verification failure                           |
-|    9 | Safety precondition, confirmation, lock, or deep journal gate          |
-|   10 | Partial completion, cleanup failure, or unknown remote result          |
-|   11 | Local backup integrity/disk verification failure                       |
-|   12 | Unexpected internal error                                              |
-|  130 | Cancellation                                                           |
+| Exit | Meaning                                                                 |
+| ---: | ----------------------------------------------------------------------- |
+|    0 | All required evidence passed or the exact target state already existed  |
+|    2 | CLI/configuration/password validation                                   |
+|    3 | Network/transport/protocol connection failure                           |
+|    4 | Web/SSH/Telnet authentication failure                                   |
+|    5 | Device/profile/capability/host-key compatibility failure                |
+|    6 | Device API explicitly rejected a request                                |
+|    7 | Remote command or tool failure                                          |
+|    8 | Final state/root/reboot verification failure                            |
+|    9 | Safety precondition, confirmation, lock, deep journal, or recovery gate |
+|   10 | Partial completion, cleanup failure, or unknown remote result           |
+|   11 | Local backup integrity/disk verification or recovery record failure     |
+|   12 | Unexpected internal error                                               |
+|  130 | Cancellation                                                            |
 
 Nonzero statuses require reading the report. In particular, `partial` and `unknown` are not safe automatic-retry signals.

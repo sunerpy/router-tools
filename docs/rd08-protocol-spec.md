@@ -170,7 +170,9 @@
 ```text
 rd08ctl
 ├── version
+├── profiles
 ├── doctor
+├── setup
 ├── enable
 ├── verify
 ├── persist
@@ -180,27 +182,31 @@ rd08ctl
 ├── backup
 │   ├── create
 │   └── verify
-└── deep-persist
+├── deep-persist
+└── recovery
+    └── ack
 ```
+
+`setup` 是引导流程（§10.4）；`recovery ack` 记录对不确定变更的人工检查（§16.6）。
 
 ### 4.2 全局参数
 
-| 参数                    | 默认值                 | 说明                                                 |
-| ----------------------- | ---------------------- | ---------------------------------------------------- |
-| `--host`                | `192.168.31.1`         | IP 或主机名；变更操作前解析并固定本次连接地址        |
-| `--web-port`            | `80`                   | Web HTTP 端口                                        |
-| `--ssh-port`            | `22`                   | SSH 端口                                             |
-| `--telnet-port`         | `23`                   | Telnet 端口                                          |
-| `--config`              | OS 用户配置路径        | JSON 配置文件，不保存秘密                            |
-| `--profile`             | `rd08-1.1.96`          | 首版唯一可选 profile                                 |
-| `--json`                | `false`                | stdout 仅输出 JSON 报告，日志写 stderr               |
-| `--non-interactive`     | `false`                | 禁止交互提问；缺少秘密或确认即失败                   |
-| `--allow-telnet`        | `false`                | 允许 Shell 回退到 Telnet；深度固化必须显式开启       |
-| `--host-key-sha256`     | 空                     | 固定预期 SSH 主机密钥 SHA-256 指纹                   |
-| `--accept-new-host-key` | `false`                | 非交互模式接受此前未知主机密钥；不得接受变化的旧密钥 |
-| `--run-dir`             | 系统临时目录下自动生成 | 报告和 journal 保存目录                              |
-| `--log-level`           | `info`                 | `debug`、`info`、`warn`、`error`；debug 也不输出秘密 |
-| `--yes`                 | `false`                | 确认普通变更；不能替代深度固化专用确认               |
+| 参数                    | 默认值                                                           | 说明                                                 |
+| ----------------------- | ---------------------------------------------------------------- | ---------------------------------------------------- |
+| `--host`                | `192.168.31.1`                                                   | IP 或主机名；变更操作前解析并固定本次连接地址        |
+| `--web-port`            | `80`                                                             | Web HTTP 端口                                        |
+| `--ssh-port`            | `22`                                                             | SSH 端口                                             |
+| `--telnet-port`         | `23`                                                             | Telnet 端口                                          |
+| `--config`              | OS 用户配置路径                                                  | JSON 配置文件，不保存秘密                            |
+| `--profile`             | `rd08-1.1.96`                                                    | 首版唯一可选 profile                                 |
+| `--json`                | `false`                                                          | stdout 仅输出 JSON 报告，日志写 stderr               |
+| `--non-interactive`     | `false`                                                          | 禁止交互提问；缺少秘密或确认即失败                   |
+| `--allow-telnet`        | `false`                                                          | 允许 Shell 回退到 Telnet；深度固化必须显式开启       |
+| `--host-key-sha256`     | 空                                                               | 固定预期 SSH 主机密钥 SHA-256 指纹                   |
+| `--accept-new-host-key` | `false`                                                          | 非交互模式接受此前未知主机密钥；不得接受变化的旧密钥 |
+| `--run-dir`             | 报告：系统临时目录下自动生成；deep journal：§15.3(11) 的托管目录 | 报告和 journal 保存目录                              |
+| `--log-level`           | `info`                                                           | `debug`、`info`、`warn`、`error`；debug 也不输出秘密 |
+| `--yes`                 | `false`                                                          | 确认普通变更；不能替代深度固化专用确认               |
 
 ### 4.3 秘密输入
 
@@ -223,17 +229,19 @@ rd08ctl
 
 ### 4.4 各命令输入与行为
 
-| 命令             | 需要的秘密                           | 默认传输                       | 设备写操作                                |
-| ---------------- | ------------------------------------ | ------------------------------ | ----------------------------------------- |
-| `doctor`         | 管理密码可选                         | HTTP；SSH 仅在提供 root 密码时 | 无                                        |
-| `enable`         | 管理密码 + 新 root 密码              | HTTP，随后 SSH                 | NVRAM、Dropbear、root 密码、临时 MAC 规则 |
-| `verify`         | 当前 root 密码                       | SSH；指定时可用 Telnet         | 仅执行 `id -u`                            |
-| `persist soft`   | 当前 root 密码                       | SSH；可显式允许 Telnet         | `/data` 文件和 UCI                        |
-| `persist remove` | 当前 root 密码                       | SSH；可显式允许 Telnet         | 删除工具管理的自启项                      |
-| `reboot-verify`  | 当前 root 密码                       | SSH；可按参数回退              | 重启设备                                  |
-| `backup create`  | 当前 root 密码                       | 仅 SSH                         | 路由器只读，本地写备份                    |
-| `backup verify`  | 纯本地无需秘密；在线校验需 root 密码 | 无；在线附加检查用 SSH         | 默认仅本地读取，在线模式仅只读检查        |
-| `deep-persist`   | 当前 root 密码                       | SSH + 显式允许的 Telnet        | 高风险分区与配置写入、三次重启            |
+| 命令             | 需要的秘密                                            | 默认传输                       | 设备写操作                                    |
+| ---------------- | ----------------------------------------------------- | ------------------------------ | --------------------------------------------- |
+| `doctor`         | 管理密码可选                                          | HTTP；SSH 仅在提供 root 密码时 | 无                                            |
+| `enable`         | 管理密码 + 新 root 密码                               | HTTP，随后 SSH                 | NVRAM、Dropbear、root 密码、临时 MAC 规则     |
+| `verify`         | 当前 root 密码                                        | SSH；指定时可用 Telnet         | 仅执行 `id -u`                                |
+| `persist soft`   | 当前 root 密码                                        | SSH；可显式允许 Telnet         | `/data` 文件和 UCI                            |
+| `persist remove` | 当前 root 密码                                        | SSH；可显式允许 Telnet         | 删除工具管理的自启项                          |
+| `reboot-verify`  | 当前 root 密码                                        | SSH；可按参数回退              | 重启设备                                      |
+| `backup create`  | 当前 root 密码                                        | 仅 SSH                         | 路由器只读，本地写备份                        |
+| `backup verify`  | 纯本地无需秘密；在线校验需 root 密码                  | 无；在线附加检查用 SSH         | 默认仅本地读取，在线模式仅只读检查            |
+| `deep-persist`   | 当前 root 密码                                        | SSH + 显式允许的 Telnet        | 高风险分区与配置写入、三次重启                |
+| `setup`          | 按计划所需：当前 root 密码，或管理密码 + 新 root 密码 | HTTP 探测，随后仅 SSH          | 只执行确认过的步骤（§10.4）；`--plan-only` 无 |
+| `recovery ack`   | 无                                                    | 无，只写本地恢复记录           | 无                                            |
 
 ### 4.5 使用示例
 
@@ -250,8 +258,12 @@ rd08ctl verify --host 192.168.31.1
 # 安装、验证软固化
 rd08ctl persist soft --host 192.168.31.1
 
-# 备份所有 MTD 分区到新目录
+# 备份所有 MTD 分区到新目录；不带 --output 时使用 §14.2 的托管目录
 rd08ctl backup create --host 192.168.31.1 --output ./rd08-backup-20261125
+
+# 只读检测并显示计划，再按确认执行缺少的步骤
+rd08ctl setup --plan-only
+rd08ctl setup
 
 # 本地重新校验备份
 rd08ctl backup verify --dir ./rd08-backup-20261125
@@ -263,7 +275,7 @@ rd08ctl deep-persist --host 192.168.31.1 \
   --ack-deep RD08-DEEP
 ```
 
-`--output` 是 `backup create` 的必填参数；`--dir` 是 `backup verify` 的必填参数；`--backup-dir` 是 `deep-persist` 的必填参数。
+`--output` 可选，未指定时在 §14.2 的托管目录下新建备份目录；`--dir` 是 `backup verify` 的必填参数；`--backup-dir` 是 `deep-persist` 的必填参数。
 
 `verify` 另支持 `--transport ssh|telnet|auto`，默认 `ssh`。其他需要 Shell 的命令默认仅 SSH；只有 `--allow-telnet` 时才按 SSH、Telnet 顺序回退。`backup create` 是例外，任何时候都只允许 SSH。
 
@@ -769,12 +781,57 @@ POSIX Shell 单引号转义统一实现为：将每个 `'` 替换为 `'"'"'`，�
 
 所有变更命令在写入前必须：
 
-- 获取每主机非阻塞锁；获取失败即退出。
+- 获取每台路由器的非阻塞锁（§16.3）；获取失败即退出。
 - 确认设备 profile 匹配。
 - 验证所需秘密和确认参数。
+- 由引导流程发起时，在加锁并解析 profile 之后再次核对确认时的设备身份（§10.4）。
 - 验证所需远程工具存在。
+- 在第一次写设备之前写入恢复记录；上次变更结果未经确认时拒绝（§16.6）。
 - 创建运行报告并写入初始阶段。
 - 明确展示将改变的状态和不可逆部分。
+
+### 10.4 引导流程（`setup` 与桌面向导）
+
+引导流程把开启 SSH、备份、软固化和重启验证合成一次检测和一次确认，只做缺少的步骤。它复用各单项命令的实现和全部门禁，不新增任何设备写法。命令行 `setup` 已实现；桌面端已有同样的绑定，向导界面随后续界面改版提供。
+
+检测只读，按以下顺序进行；任一步失败都不计划写入：
+
+1. 校验目标、目标集合（`ssh` 必选；`reboot` 要求 `soft`）和 profile。
+2. 设备锁被占用，或恢复记录阻断（§16.6）时，在联网之前停止。
+3. 探测设备并解析精确 profile；不支持时列出同型号已注册的固件，由用户自行选择，不自动切换。
+4. SSH 端口开放且提供了 root 密码时，用密码认证的 SSH 验证 root；Telnet 结果不计入。
+5. root SSH 验证通过时，用固定只读命令检查软固化状态（§12.5）。
+6. 在本地托管备份目录（§14.2）查找通过本地校验且设备身份一致的备份。
+
+步骤固定按 `enable_ssh`、`backup`、`soft_install`、`reboot_verify` 排序，只包含所选目标。每步的动作是 `run`、`skip`、`decide_after`、`needs_input`、`blocked` 或 `unsupported` 之一：
+
+| 条件                                       | 结果                                                         |
+| ------------------------------------------ | ------------------------------------------------------------ |
+| root SSH 已验证                            | `enable_ssh` 跳过                                            |
+| SSH 端口关闭或不可达                       | `enable_ssh` 执行，需要 Web 管理密码和新 root 密码（输两次） |
+| SSH 端口开放，root 密码未提供或被拒绝      | `needs_input`：输入当前 root 密码后重新检测                  |
+| 同上，且用户显式选择重置 root 密码         | `enable_ssh` 执行，影响中列出修改 root 密码                  |
+| 已有通过校验的托管备份                     | `backup` 跳过；否则执行，只走 SSH                            |
+| 软固化已安装并校验通过                     | `soft_install` 跳过                                          |
+| 软固化未安装，或脚本内容漂移               | `soft_install` 执行                                          |
+| 脚本权限漂移、UCI 漂移                     | `blocked`，需先单独执行 `persist remove`                     |
+| 外来配置、残留脚本                         | `blocked`，需人工检查；工具不覆盖                            |
+| SSH 尚不可用                               | `soft_install` 为 `decide_after`，开启 SSH 后再检查          |
+| 选择了 `reboot`                            | `reboot_verify` 每次都执行，没有可持久的证据可以跳过         |
+| 锁占用、恢复记录阻断、不兼容、主机密钥不符 | 全部步骤 `blocked`，不计划任何写入                           |
+
+深度固化和移除软固化永远不进入引导流程。
+
+计划可执行时生成确认清单：目标（主机和全部端口）、设备身份（`device_id`、按备份规则回退后的 hardware、`display_name`、`rom_version`）、解析出的 profile、目标集合、是否重置 root 密码，以及每步的动作和影响代码。清单不含任何秘密，`plan_digest` 是清单规范 JSON 的 SHA-256。确认界面一次列出全部写入及其不可逆影响，默认焦点为取消，确认不被记住。
+
+执行规则：
+
+1. 校验 `plan_digest`，不一致即以 `CONFIRMATION_REQUIRED` 停止。
+2. 用确认时的 profile 重新检测。重新检测本身失败时（例如固件已变，`UNSUPPORTED_FIRMWARE`；或恢复记录阻断），返回该错误。检测成功后，新计划只允许 `run → run | skip`、`decide_after → decide_after | run | skip`、`skip → skip`，`run` 的影响代码必须与确认时一致；设备身份、目标集合变化，或任何一步多做、改做时，在第一次写入前以 `CONFIRMATION_REQUIRED` 停止，要求重新检测。
+3. 每个执行步骤调用对应的单项操作，并带上确认标记和确认时的设备身份；单项操作在加锁并解析 profile 之后、写入之前再次核对身份。
+4. `decide_after` 步骤在前一步成功后重新检查，只能变为跳过，或按确认时的影响执行。
+5. 在第一个未成功的步骤处停止，其后的步骤为 `not_run`；不自动重试，也不自动续跑。
+6. 引导流程只使用 SSH，不使用 Telnet。
 
 ## 11. 临时开启 SSH
 
@@ -944,6 +1001,8 @@ sha256sum /data/auto_ssh/auto_ssh.sh
 - UCI 路径不是本工具路径：冲突失败。
 - 不得覆盖其他名称的 firewall include。
 
+引导流程使用的只读检查只执行上面这些固定读取命令，返回以下状态之一：`not_installed`；`installed_verified`；`file_drift`（UCI 完整、脚本内容不一致，安装可修复）；`mode_drift`（内容一致但脚本不可执行或语法检查失败）；`uci_drift`（路径是本工具路径但其他值不符）；`conflict`（外来路径或无法识别的配置）；`orphan_file`（脚本存在但没有 UCI include）。
+
 ### 12.6 移除软固化
 
 `persist remove` 只移除本工具管理的自启项：
@@ -1034,7 +1093,7 @@ cat /proc/sys/kernel/random/boot_id
 
 ### 14.2 输出目录
 
-用户必须指定一个不存在的新目录。禁止默认覆盖已有备份。
+用户可以指定一个不存在的新目录。未指定时，在托管目录 `<用户主目录>/RouterTools/backups/<model-id>/<主机>-<恢复键前 12 位>/<UTC 时间戳>/` 下新建目录。任何情况下都禁止覆盖已有备份。
 
 ```text
 <output>/
@@ -1179,7 +1238,8 @@ manifest 不得包含管理密码、root 密码、`stok`、Web `key`、任何私
 8. 初始 SSH root 验证通过，不能只依赖 Telnet。
 9. 交互模式依次显示风险、备份摘要和三次重启说明，要求输入完整短语 `RD08-DEEP`。
 10. 非交互模式必须提供 `--ack-deep RD08-DEEP`；`--yes` 不能替代。
-11. 不存在同主机未完成 deep journal；存在时拒绝从头运行。
+11. 不存在同主机未完成 deep journal；存在时拒绝从头运行。未指定 run 目录时，journal 固定在托管目录 `<用户配置目录>/routerctl/deep/<model-id>/<主机>-<恢复键前 12 位>/`，改端口也会遇到已有 journal。
+12. 恢复记录未阻断（§16.6）。
 
 任何前置检查失败都不得写 `crash`、`nvram` 或 `bdata`。
 
@@ -1325,7 +1385,7 @@ Windows 上使用可用 ACL 语义，并在文档中说明 POSIX mode 不完全�
 
 ### 16.3 并发控制
 
-1. 以规范化 host + 端口为键，对每台设备获取跨进程非阻塞锁。
+1. 以恢复键为键，对每台路由器获取跨进程非阻塞锁。恢复键是 `SHA-256("router-tools/recovery/v1\0" + 规范化主机)` 的十六进制：IP 字面量统一格式，主机名转小写并去掉末尾的点；管理端口不参与。托管目录名用规范化主机加恢复键前 12 位，deep journal 文件名也用规范化主机。同一台路由器无论使用哪组端口，都共用一把锁、一条恢复记录和同一组托管目录。用主机名和 IP 访问同一台路由器时会被当成两台，这是已知限制。
 2. 锁被占用时立即失败，不排队执行写操作。
 3. 进程异常退出后 OS 释放 flock；锁文件本身可保留。
 4. 同一进程也不得并发运行两个设备变更 operation。
@@ -1347,25 +1407,36 @@ Windows 上使用可用 ACL 语义，并在文档中说明 POSIX mode 不完全�
 - MAC 清理在可安全继续时仍应尝试，但必须有短 deadline，不能无限等待。
 - 深度固化取消后保留 journal 并显示中断阶段。
 
+### 16.6 变更结果记录与恢复确认
+
+每个会写设备的操作（开启 SSH、安装或移除软固化、重启验证、深度固化），无论从单项命令、桌面端还是引导流程发起，都在拿到设备锁、完成 profile 解析和能力检查之后、第一次写设备之前，写入 `<用户配置目录>/routerctl/state/<恢复键>.json`（目录 `0700`，文件 `0600`，临时文件加 fsync 后原子替换）：
+
+1. 先写 `in_progress` 且 `device_write_possible=true`；写不进去即以 `STATE_STORE_FAILED` 中止，不发送任何写命令。
+2. 结束时在释放锁之前写入最终状态；这次写失败时保留 `in_progress`，记录继续阻断。
+3. `device_write_possible` 只能由适配器给出的阶段证据降为 `false`：开启 SSH 未被接受任何一步且没有尝试过 MAC 规则；软固化安装、移除或重启验证在第一次写之前失败；深度固化在写 `crash` 之前失败。仅凭错误码不能降低，例如重启已提交、重连时才出现主机密钥错误，仍记为可能已写。
+4. 记录状态为 `in_progress`、`partial`、`unknown`，或为 `failed` 且可能已写设备，并且其后没有人工确认时，所有会写设备的操作都以 `RECOVERY_REVIEW_REQUIRED` 拒绝。
+5. 用户按 RECOVERY.md 检查设备后执行 `recovery ack`。桌面端已有同等绑定，界面入口随向导提供。确认只记录时间，不删除记录；之后再出现不确定结果会再次阻断。
+6. 记录只含元数据：操作、状态、错误码、时间、是否可能已写设备，以及适配器的阶段证据（是否已开始写、已接受的步骤数、尝试过和未能清理的临时 MAC 规则、deep journal 路径）；不含密码、命令或报告正文。备份创建以及 `doctor`、`verify`、`backup verify` 等只读操作不受阻断；引导检测在记录阻断时直接返回全部步骤 `blocked`（§10.4）。
+
 ## 17. 错误模型与退出码
 
 ### 17.1 进程退出码
 
-| 退出码 | 含义                                                     |
-| -----: | -------------------------------------------------------- |
-|    `0` | 全部要求成功，或明确返回已处于目标状态                   |
-|    `2` | CLI 参数、密码或本地配置校验失败                         |
-|    `3` | 网络不可达、超时或协议连接失败                           |
-|    `4` | Web、SSH 或 Telnet 认证失败                              |
-|    `5` | 型号、固件、profile 或主机密钥不满足要求                 |
-|    `6` | 设备 API 明确拒绝请求                                    |
-|    `7` | 已建立 Shell 的远程命令返回非零或远程工具缺失            |
-|    `8` | 最终状态验证失败                                         |
-|    `9` | 安全前置条件失败，例如备份缺失、布局不匹配、缺少专用确认 |
-|   `10` | 部分完成、清理失败或远端结果未知，需要人工检查           |
-|   `11` | 本地备份完整性或磁盘写入校验失败                         |
-|   `12` | 未预期内部错误                                           |
-|  `130` | 用户取消                                                 |
+| 退出码 | 含义                                                                             |
+| -----: | -------------------------------------------------------------------------------- |
+|    `0` | 全部要求成功，或明确返回已处于目标状态                                           |
+|    `2` | CLI 参数、密码或本地配置校验失败                                                 |
+|    `3` | 网络不可达、超时或协议连接失败                                                   |
+|    `4` | Web、SSH 或 Telnet 认证失败                                                      |
+|    `5` | 型号、固件、profile 或主机密钥不满足要求                                         |
+|    `6` | 设备 API 明确拒绝请求                                                            |
+|    `7` | 已建立 Shell 的远程命令返回非零或远程工具缺失                                    |
+|    `8` | 最终状态验证失败                                                                 |
+|    `9` | 安全前置条件失败，例如备份缺失、布局不匹配、缺少专用确认，或上次变更结果尚未确认 |
+|   `10` | 部分完成、清理失败或远端结果未知，需要人工检查                                   |
+|   `11` | 本地备份完整性、磁盘写入校验或恢复记录读写失败                                   |
+|   `12` | 未预期内部错误                                                                   |
+|  `130` | 用户取消                                                                         |
 
 错误码优先级：主要操作错误优先于清理错误；但若主要操作成功而清理失败，使用 `10`。JSON 中保留所有次要 warning。
 
@@ -1401,6 +1472,8 @@ BACKUP_LAYOUT_MISMATCH
 DEEP_ACK_REQUIRED
 DEEP_JOURNAL_EXISTS
 OPERATION_LOCKED
+RECOVERY_REVIEW_REQUIRED
+STATE_STORE_FAILED
 CANCELED
 INTERNAL_ERROR
 ```

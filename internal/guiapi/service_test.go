@@ -23,6 +23,13 @@ type fakeApplication struct {
 	events        app.EventSink
 	ctx           context.Context
 	started       chan struct{}
+	guideRequest  app.GuideRequest
+	planReport    app.GuidePlanReport
+	planErr       error
+	applyRequest  app.GuideApplyRequest
+	applyReport   app.GuideApplyReport
+	applyErr      error
+	ackTarget     device.Target
 }
 
 func (f *fakeApplication) Doctor(ctx context.Context, request app.DoctorRequest, events app.EventSink) (app.DoctorReport, error) {
@@ -74,6 +81,27 @@ func (f *fakeApplication) BackupVerifyOnline(context.Context, app.BackupOnlineVe
 func (f *fakeApplication) DeepPersist(_ context.Context, request app.DeepRequest, _ app.EventSink) (app.DeepReport, error) {
 	f.deepRequest = request
 	return app.DeepReport{Status: app.StatusSucceeded}, nil
+}
+
+func (f *fakeApplication) GuidePlan(_ context.Context, request app.GuideRequest, events app.EventSink) (app.GuidePlanReport, error) {
+	f.guideRequest = request
+	if events != nil {
+		events.Emit(app.Event{Operation: "guide plan", Stage: "probe", Status: "running"})
+	}
+	return f.planReport, f.planErr
+}
+
+func (f *fakeApplication) GuideApply(_ context.Context, request app.GuideApplyRequest, events app.EventSink) (app.GuideApplyReport, error) {
+	f.applyRequest = request
+	if events != nil {
+		events.Emit(app.Event{Operation: "enable", Stage: "probe", Status: "running", Step: app.StepEnableSSH})
+	}
+	return f.applyReport, f.applyErr
+}
+
+func (f *fakeApplication) AcknowledgeRecovery(_ context.Context, target device.Target) (app.RecoveryReport, error) {
+	f.ackTarget = target
+	return app.RecoveryReport{Status: app.StatusSucceeded, Acknowledged: true}, nil
 }
 
 func (f *fakeApplication) Catalog() []device.CatalogEntry {

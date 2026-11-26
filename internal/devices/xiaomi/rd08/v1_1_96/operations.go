@@ -88,6 +88,8 @@ func (p *Prober) RebootVerify(ctx context.Context, target device.Target, passwor
 		return result, err
 	}
 	reboot, err := workflow.RebootAndWait(ctx, remote, p.rebootConfig(target, password, policy, false))
+	result.WriteStarted = reboot.WriteStarted
+	result.OldBootID = reboot.OldBootID
 	if err != nil {
 		return result, err
 	}

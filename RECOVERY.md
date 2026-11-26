@@ -6,12 +6,32 @@ There is deliberately no automatic `resume`, `restore`, or one-click rescue comm
 
 1. Do not issue the same write again until the device state is known.
 2. Read the report status:
-   - `failed`: the operation failed before evidence of a device write, or at a defined non-writing stage.
+   - `failed`: the operation stopped with an error. It may still have written: soft install, soft removal and reboot verification also report `failed` after a write, and their reports carry `write_started`; enable reports carry `accepted_steps` and `attempted_macs`. When a write may have happened, the recovery record blocks further changes.
    - `partial`: at least one write or cleanup stage occurred.
    - `unknown`: a write may have been submitted but its result was lost.
 3. Check SSH independently with the current root credentials and pinned host key.
 4. For enable failures, inspect all `attempted_macs` and `cleanup` entries. Remove remaining temporary rules through the router Web UI only after confirming their exact values.
 5. Do not change NVRAM or Telnet settings automatically; their previous values are unknown and they may be needed for diagnosis.
+
+## Recovery record and acknowledgement
+
+Every device change (`enable`, `persist soft`, `persist remove`, `reboot-verify`, `deep-persist`, and each write step of `setup`) first stores a record in `<user config dir>/routerctl/state/` and refuses to start if it cannot. While the last change of a router is recorded as `in_progress` (the process stopped or its final record failed), `partial`, `unknown`, or `failed` after a write may have been submitted, every further change of that router fails with `RECOVERY_REVIEW_REQUIRED` (exit 9), whichever ports are used.
+
+1. Check the router as described above and for the stage the report names.
+2. Only then run `routerctl recovery ack`. The desktop app gets its acknowledgement entry with the guided wizard; until then use the command line. Acknowledging records when you checked; the record itself is kept, and a later uncertain change blocks again.
+3. Acknowledging is not a repair. It only states that you know the router's actual state and accept continuing from it.
+
+The record keeps the adapter's evidence (`write_evidence`): whether a write started, accepted enable steps, the temporary MAC rules that were attempted and those whose removal failed, and the deep journal path. Use it when the run report is no longer available.
+
+`STATE_STORE_FAILED` (exit 11) means the record could not be read or written; nothing was sent to the router if it happened before the change, and the record stays `in_progress` if it happened after. Fix the local disk or permissions problem, check the router, then acknowledge. If the record itself cannot be parsed, acknowledging fails too: check the router, then move the router's file in `<user config dir>/routerctl/state/` (named by its recovery key, whose first 12 characters also end the router's managed directory names) out of the directory, keeping a copy.
+
+## Deep journals outside the managed directory
+
+Without a run directory, `deep-persist` keeps its journal in the router's managed directory, so any later attempt finds it. Journals written to a custom `--run-dir`, and by the desktop deep flow (which still uses the directory you choose until the guided redesign), are found only in that directory. Before another deep attempt, check every earlier run directory for a journal of the router.
+
+## If a guided run stopped
+
+`setup` runs its steps through the same commands and stops at the first step that did not succeed. Steps after it are `not_run` and were not attempted. Read the failing step's own report (enable, backup, soft or reboot) and handle it as that command's failure. Never repeat the run only because it stopped: detect again with `setup --plan-only`, which shows what is still missing, and acknowledge first if the stopped step blocks further changes.
 
 ## Deep journal stages
 

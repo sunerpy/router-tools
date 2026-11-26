@@ -146,9 +146,12 @@ func TestDeepPersistMissingCrashHasNoWrites(t *testing.T) {
 	fixture := newDeepFixture()
 	fixture.mtdText = "dev: size erasesize name\nmtd0: 00000004 00020000 \"boot\"\n"
 	prober := newDeepProber(fixture)
-	_, err := prober.DeepPersist(t.Context(), deepParams(fixture, &deepJournalFake{}))
+	result, err := prober.DeepPersist(t.Context(), deepParams(fixture, &deepJournalFake{}))
 	if err == nil {
 		t.Fatal("DeepPersist() missing crash error = nil")
+	}
+	if result.WriteStarted {
+		t.Fatal("a failure before the crash write reports a device write")
 	}
 	for _, command := range fixture.commands {
 		if strings.Contains(command, "mtd write") || strings.HasPrefix(command, "nvram set") || strings.HasPrefix(command, "bdata set") || command == "reboot" {
@@ -164,8 +167,8 @@ func TestDeepPersistUnknownCrashWriteIsNotRetried(t *testing.T) {
 	fixture.crashErr = &device.Error{Code: device.CodeRemoteResultUnknown}
 	prober := newDeepProber(fixture)
 	result, err := prober.DeepPersist(t.Context(), deepParams(fixture, &deepJournalFake{}))
-	if err == nil || result.Status != app.StatusUnknown {
-		t.Fatalf("result = %+v, error = %v", result, err)
+	if err == nil || result.Status != app.StatusUnknown || !result.WriteStarted {
+		t.Fatalf("result = %+v, error = %v; want unknown with write evidence", result, err)
 	}
 	if countCommand(fixture.commands, "mtd write - crash") != 1 || countCommand(fixture.commands, "reboot") != 0 {
 		t.Fatalf("unknown crash write was retried or rebooted: %v", fixture.commands)

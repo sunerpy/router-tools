@@ -29,6 +29,9 @@ type Application interface {
 	BackupVerify(context.Context, string, app.EventSink) (app.BackupVerifyReport, error)
 	BackupVerifyOnline(context.Context, app.BackupOnlineVerifyRequest, app.EventSink) (app.BackupVerifyReport, error)
 	DeepPersist(context.Context, app.DeepRequest, app.EventSink) (app.DeepReport, error)
+	GuidePlan(context.Context, app.GuideRequest, app.EventSink) (app.GuidePlanReport, error)
+	GuideApply(context.Context, app.GuideApplyRequest, app.EventSink) (app.GuideApplyReport, error)
+	AcknowledgeRecovery(context.Context, device.Target) (app.RecoveryReport, error)
 	Catalog() []device.CatalogEntry
 }
 
@@ -67,6 +70,23 @@ type OperationRequest struct {
 	AckDeep        string
 	ToolVersion    string
 	HostKey        HostKeyRequest
+}
+
+// GuideRequest is the desktop DTO of a guided plan or run. Password strings are converted immediately;
+// Confirmation, PlanDigest and Confirmed are used only to apply a plan.
+type GuideRequest struct {
+	OperationID       string
+	Target            device.Target
+	ProfileID         string
+	Goals             []string
+	AdminPassword     string
+	RootPassword      string
+	ResetRootPassword bool
+	Confirmation      *app.GuideConfirmation
+	PlanDigest        string
+	Confirmed         bool
+	ToolVersion       string
+	HostKey           HostKeyRequest
 }
 
 // HistoryEntry contains a report, never the originating secrets.
@@ -305,6 +325,62 @@ func (s *Service) DeepPersist(ctx context.Context, request OperationRequest) (ap
 	return report, s.settle(request.OperationID, "deep-persist", report, report.Status, err)
 }
 
+// GuidePlan detects the router and returns the guided plan. A plan changes nothing, so it is not recorded
+// in the run history; a blocked or failed plan still resolves with its report.
+func (s *Service) GuidePlan(ctx context.Context, request GuideRequest) (app.GuidePlanReport, error) {
+	operationCtx, finish, err := s.start(ctx, request.OperationID)
+	if err != nil {
+		return app.GuidePlanReport{}, err
+	}
+	defer finish()
+	root, err := makePassword(request.RootPassword)
+	if err != nil {
+		return app.GuidePlanReport{}, err
+	}
+	report, err := s.application.GuidePlan(operationCtx, app.GuideRequest{
+		Target: request.Target, ProfileID: request.ProfileID, Goals: request.Goals, RootPassword: root,
+		ResetRootPassword: request.ResetRootPassword, HostKeyPolicy: s.policy(request.OperationID, request.HostKey),
+	}, s.events(request.OperationID))
+	return report, resolution(report.Status, err)
+}
+
+// GuideApply runs a confirmed guided plan; the run enters the history as one entry.
+func (s *Service) GuideApply(ctx context.Context, request GuideRequest) (app.GuideApplyReport, error) {
+	if request.Confirmation == nil {
+		return app.GuideApplyReport{}, fmt.Errorf("a guided run requires the confirmation returned by its plan")
+	}
+	operationCtx, finish, err := s.start(ctx, request.OperationID)
+	if err != nil {
+		return app.GuideApplyReport{}, err
+	}
+	defer finish()
+	admin, err := makePassword(request.AdminPassword)
+	if err != nil {
+		return app.GuideApplyReport{}, err
+	}
+	root, err := makePassword(request.RootPassword)
+	if err != nil {
+		return app.GuideApplyReport{}, err
+	}
+	report, err := s.application.GuideApply(operationCtx, app.GuideApplyRequest{
+		Confirmation: *request.Confirmation, PlanDigest: request.PlanDigest, Confirmed: request.Confirmed,
+		AdminPassword: admin, RootPassword: root, HostKeyPolicy: s.policy(request.OperationID, request.HostKey),
+		ToolVersion: request.ToolVersion,
+	}, s.events(request.OperationID))
+	return report, s.settle(request.OperationID, "guide apply", report, report.Status, err)
+}
+
+// AcknowledgeRecovery records that the operator checked the router after an uncertain change.
+func (s *Service) AcknowledgeRecovery(ctx context.Context, request OperationRequest) (app.RecoveryReport, error) {
+	operationCtx, finish, err := s.start(ctx, request.OperationID)
+	if err != nil {
+		return app.RecoveryReport{}, err
+	}
+	defer finish()
+	report, err := s.application.AcknowledgeRecovery(operationCtx, request.Target)
+	return report, s.settle(request.OperationID, "recovery ack", report, report.Status, err)
+}
+
 // Catalog lists the registered device models and exact firmware profiles. It needs no operation ID, no
 // network and records no history.
 func (s *Service) Catalog() []device.CatalogEntry {
@@ -358,6 +434,12 @@ func (s *Service) start(parent context.Context, operationID string) (context.Con
 // running alongside an error.
 func (s *Service) settle(operationID, operation string, report any, status string, err error) error {
 	s.record(operationID, operation, report)
+	return resolution(status, err)
+}
+
+// resolution is the binding error for a report with the given status: nil for failed, partial and unknown
+// reports, which carry their own redacted error, and the error otherwise.
+func resolution(status string, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -387,16 +469,20 @@ func (s *Service) events(operationID string) app.EventSink {
 }
 
 func (s *Service) hostPolicy(request OperationRequest) hostkey.Policy {
-	path := request.HostKey.KnownHostsPath
+	return s.policy(request.OperationID, request.HostKey)
+}
+
+func (s *Service) policy(operationID string, request HostKeyRequest) hostkey.Policy {
+	path := request.KnownHostsPath
 	if path == "" {
 		if directory, err := os.UserConfigDir(); err == nil {
 			path = filepath.Join(directory, "routerctl", "known_hosts")
 		}
 	}
-	policy := hostkey.Policy{KnownHostsPath: path, PinSHA256: request.HostKey.PinSHA256, AcceptNew: request.HostKey.AcceptNew}
+	policy := hostkey.Policy{KnownHostsPath: path, PinSHA256: request.PinSHA256, AcceptNew: request.AcceptNew}
 	if s.confirmer != nil {
 		policy.Confirm = func(prompt hostkey.Prompt) bool {
-			return s.confirmer.Confirm(request.OperationID, prompt)
+			return s.confirmer.Confirm(operationID, prompt)
 		}
 	}
 	return policy

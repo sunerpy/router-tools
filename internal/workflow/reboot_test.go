@@ -105,6 +105,31 @@ func TestRebootAndWaitRejectsInvalidInitialBootIDBeforeWrite(t *testing.T) {
 	}
 }
 
+// WriteStarted is set before the reboot command and stays set for every failure after it.
+func TestRebootAndWaitWriteEvidence(t *testing.T) {
+	t.Parallel()
+
+	result, err := workflow.RebootAndWait(t.Context(), &rebootShell{bootID: "invalid", uid: "0"}, workflow.RebootConfig{})
+	if err == nil || result.WriteStarted {
+		t.Fatalf("invalid boot_id: WriteStarted = %v, err = %v; want no write", result.WriteStarted, err)
+	}
+
+	oldShell := &rebootShell{bootID: "00000000-0000-0000-0000-000000000001", uid: "0"}
+	result, err = workflow.RebootAndWait(t.Context(), oldShell, workflow.RebootConfig{
+		Sleep:     func(time.Duration) {},
+		PortsDown: func(context.Context) (bool, error) { return true, nil },
+		Connect: func(context.Context) (shell.Shell, error) {
+			return nil, &device.Error{Code: device.CodeHostKeyMismatch, Message: "host key changed"}
+		},
+		DownRounds:    1,
+		OnlineTimeout: time.Second,
+	})
+	assertWorkflowCode(t, err, device.CodeHostKeyMismatch)
+	if !result.WriteStarted {
+		t.Fatal("a reboot that was submitted is reported as no write")
+	}
+}
+
 func assertWorkflowCode(t *testing.T, err error, want string) {
 	t.Helper()
 	if err == nil {

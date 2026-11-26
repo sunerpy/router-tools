@@ -17,6 +17,16 @@ Web administration and Telnet use plaintext local-network protocols. Telnet is d
 
 The word “temporary” applies only to the usual Dropbear-script lifetime. It does not roll back NVRAM or the root password. A successful HTTP request is not command-success evidence; final success requires a new SSH root login and completed cleanup.
 
+## Guided setup
+
+`setup` asks for one confirmation that covers several writes (the desktop wizard follows with the guided redesign): the confirmation lists every planned step and its effects, including the root password change, the committed NVRAM switches, the managed boot script and firewall include, and the reboot. Read the whole list before confirming.
+
+The router can change between detection and the run. The run therefore detects again first and stops before any write if the device, the profile or any step would do more or something else than you confirmed; you then have to detect and confirm again. Steps may only do less (for example skip a backup that appeared meanwhile). A step decided after SSH works may only install the soft persistence that was listed.
+
+When SSH is open but the root password is unknown, `setup` asks for the current password instead of changing it; it changes the root password only with an explicit `--reset-root-password` choice. Deep persistence and soft-persistence removal are never part of a guided run.
+
+The router is identified by its normalized address, not by its ports: one lock, one recovery record and one set of managed directories exist per address. A host name and an IP address of the same router count as two routers, so use one form consistently.
+
 ## Soft persistence and reboot
 
 Soft persistence installs `/data/auto_ssh/auto_ssh.sh` and the `firewall.auto_ssh` include. Installation verification does not prove boot behavior. Only `reboot-verify` or an equivalent manual reboot can establish that.
