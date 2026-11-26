@@ -21,6 +21,8 @@ Implemented views:
 
 The guided-flow bindings `GuidePlan`, `GuideApply` and `AcknowledgeRecovery` exist in `internal/guiapi`, `cmd/routergui/app.go`, `src/services/api.ts` and both APIs in `src/services/wails.ts`; the wizard that uses them replaces the step-by-step views in the next redesign. `GuidePlan` keeps no history because detection changes nothing; a guided run and an acknowledgement each add one history entry. The window passes the plan's `confirmation` back unchanged, since `plan_digest` covers it. The preview mock plans a fresh device by default and accepts the scenarios `configured`, `recovery`, `unsupported` and `failed`; `partial`, `unknown` and `failed` also shape the run result.
 
+Requests carry `UseSavedPassword` and `RememberPassword`; the bindings `CredentialStatus`, `ForgetCredential` and `ForgetAllCredentials` return saved-password metadata only, and `GuidePlan` reports `saved_admin`/`saved_root` so a window can ask only for missing passwords. The current views neither use nor save passwords; the remember switch, saved badges and settings card arrive with the guided redesign. The preview mock keeps an in-memory vault of metadata that a successful guided run with `RememberPassword` fills.
+
 Passwords and the deep acknowledgement are cleared after dispatch/cancel and are never persisted in localStorage. Only target/profile/public host-key preferences and the theme choice are stored. Unknown host keys display the full public fingerprint in a modal; changed keys cannot be approved away. Deep/unknown/partial results retain their reports and non-retry warnings.
 
 ## Development requirements
@@ -74,7 +76,7 @@ The Linux binary was launched under Xvfb and kept running for 15 seconds without
 
 ## Frontend tests and browser QA
 
-- 292 Vitest cases across 13 files. 176 are parameterized design checks: `tokens.test.ts` computes WCAG contrast for every text pair (at least 4.5:1) and every status indicator (at least 3:1) in both themes, and `tokenTrace.test.ts` rejects undefined tokens, literal colours and raw pixel sizes in every component. The rest cover primitives, the theme controller, the dashboard summaries, exact acknowledgement, operation state, resolved failed/partial/unknown reports, canceled runs with and without writes, rejected calls, integer ports, preview scenarios including the guided-flow plans and runs, cancellation, secret clearing, and host-key confirmation.
+- 296 Vitest cases across 14 files. 176 are parameterized design checks: `tokens.test.ts` computes WCAG contrast for every text pair (at least 4.5:1) and every status indicator (at least 3:1) in both themes, and `tokenTrace.test.ts` rejects undefined tokens, literal colours and raw pixel sizes in every component. The rest cover primitives, the theme controller, the dashboard summaries, exact acknowledgement, operation state, resolved failed/partial/unknown reports, canceled runs with and without writes, rejected calls, integer ports, preview scenarios including the guided-flow plans and runs and the saved-password vault, cancellation, secret clearing, and host-key confirmation.
 - `vue-tsc` and Vite production build pass.
 - Real Chrome captures at 375 / 768 / 1280 in both themes show no horizontal document overflow; the target form switches layout by its own width (container queries).
 - Long report evidence: the JSON region is bounded at 320 px and scrolls independently, leaving operation controls intact.

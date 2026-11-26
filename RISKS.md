@@ -27,6 +27,12 @@ When SSH is open but the root password is unknown, `setup` asks for the current 
 
 The router is identified by its normalized address, not by its ports: one lock, one recovery record and one set of managed directories exist per address. A host name and an IP address of the same router count as two routers, so use one form consistently.
 
+## Saved passwords
+
+`--remember-password` saves a typed Web admin or root password after the router accepted it, in `<user config dir>/routerctl/credentials/` (the desktop request supports the same choice; its switch arrives with the guided redesign). Each password is encrypted with AES-256-GCM. On every platform, any program running as your user can decrypt the saved passwords. On Windows the vault key is additionally protected with DPAPI, so a copied `vault.key` is useless under another account or on another computer; on macOS and Linux the key is a 0600 file, and copying `vault.json` together with `vault.key` is enough to decrypt. This protects against casual viewing and against someone copying only `vault.json`; it is not a master password. Uninstalling the app does not delete the vault; `routerctl credentials forget --all` does.
+
+A saved root password is never sent over Telnet and never to an SSH host key that was not already known, pinned or confirmed by you. A saved password the router refuses is marked rejected and not used again until you type the right one and save it again with `--remember-password`. Deep persistence never uses saved passwords.
+
 ## Soft persistence and reboot
 
 Soft persistence installs `/data/auto_ssh/auto_ssh.sh` and the `firewall.auto_ssh` include. Installation verification does not prove boot behavior. Only `reboot-verify` or an equivalent manual reboot can establish that.

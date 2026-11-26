@@ -29,6 +29,9 @@ type GuideApplyRequest struct {
 	RootPassword  secret.Password
 	HostKeyPolicy hostkey.Policy
 	ToolVersion   string
+	// Credentials may fill the admin password and, when SSH already works, the root password; the root
+	// password the enable step sets is always typed.
+	Credentials CredentialUse
 }
 
 // GuideStepResult is the outcome of one guided step together with its use-case report.
@@ -89,7 +92,7 @@ func (s *Service) GuideApply(ctx context.Context, request GuideApplyRequest, eve
 	if confirmation.SchemaVersion != 1 || request.PlanDigest == "" || subtle.ConstantTimeCompare([]byte(digest), []byte(request.PlanDigest)) != 1 {
 		return fail(planChanged("the confirmation does not match its plan digest"))
 	}
-	if err := request.RootPassword.Validate(); err != nil {
+	if err := checkTypedPassword(request.RootPassword, request.Credentials); err != nil {
 		return fail(err)
 	}
 
@@ -98,6 +101,7 @@ func (s *Service) GuideApply(ctx context.Context, request GuideApplyRequest, eve
 		Target: confirmation.Target, ProfileID: confirmation.Identity.ProfileID, Goals: confirmation.Goals,
 		RootPassword: request.RootPassword, ResetRootPassword: confirmation.ResetRootPassword,
 		HostKeyPolicy: request.HostKeyPolicy,
+		Credentials:   CredentialUse{UseSaved: request.Credentials.UseSaved, Redactor: request.Credentials.Redactor},
 	}, operationEmitter("guide plan", stepSink(events, "detect")))
 	report.Device, report.Profile = fresh.Device, fresh.Profile
 	if err != nil {
@@ -115,7 +119,10 @@ func (s *Service) GuideApply(ctx context.Context, request GuideApplyRequest, eve
 	}
 	for _, step := range steps {
 		if step.ID == StepEnableSSH && step.Action == ActionRun {
-			if err := request.AdminPassword.Validate(); err != nil {
+			if err := checkTypedPassword(request.AdminPassword, request.Credentials); err != nil {
+				return fail(err)
+			}
+			if err := request.RootPassword.Validate(); err != nil {
 				return fail(err)
 			}
 		}
@@ -175,20 +182,20 @@ func (s *Service) runGuideStep(ctx context.Context, id string, confirmation Guid
 	target, profileID := confirmation.Target, confirmation.Identity.ProfileID
 	soft := SoftRequest{
 		Target: target, ProfileID: profileID, RootPassword: request.RootPassword, HostKeyPolicy: request.HostKeyPolicy,
-		Confirmed: true, ExpectedIdentity: identity,
+		Confirmed: true, ExpectedIdentity: identity, Credentials: request.Credentials,
 	}
 	switch id {
 	case StepEnableSSH:
 		enable, err := s.EnableSSH(ctx, EnableRequest{
 			Target: target, ProfileID: profileID, AdminPassword: request.AdminPassword, RootPassword: request.RootPassword,
-			HostKeyPolicy: request.HostKeyPolicy, Confirmed: true, ExpectedIdentity: identity,
+			HostKeyPolicy: request.HostKeyPolicy, Confirmed: true, ExpectedIdentity: identity, Credentials: request.Credentials,
 		}, sink)
 		result.Enable, result.Status = &enable, enable.Status
 		return err
 	case StepBackup:
 		created, err := s.BackupCreate(ctx, BackupCreateRequest{
 			Target: target, ProfileID: profileID, RootPassword: request.RootPassword, HostKeyPolicy: request.HostKeyPolicy,
-			ToolVersion: request.ToolVersion, ExpectedIdentity: identity,
+			ToolVersion: request.ToolVersion, ExpectedIdentity: identity, Credentials: request.Credentials,
 		}, sink)
 		result.Backup, result.Status = &created, created.Status
 		return err
@@ -215,7 +222,14 @@ func (s *Service) decideDeferred(ctx context.Context, adapter device.Adapter, co
 	if !ok {
 		return step, &device.Error{Code: device.CodeUnsupportedCapability, Message: "soft persistence inspection is unavailable"}
 	}
-	soft, err := inspector.InspectSoft(ctx, confirmation.Target, request.RootPassword, request.HostKeyPolicy)
+	use := CredentialUse{UseSaved: request.Credentials.UseSaved, Redactor: request.Credentials.Redactor}
+	creds := s.credentialSession(use, confirmation.Target, adapter.Profile(), secret.NewRedactor())
+	root, err := creds.root(request.RootPassword, false)
+	if err != nil {
+		return step, err
+	}
+	soft, err := inspector.InspectSoft(ctx, confirmation.Target, root, creds.hostKeys(request.HostKeyPolicy))
+	creds.observe(err)
 	if err != nil {
 		return step, err
 	}

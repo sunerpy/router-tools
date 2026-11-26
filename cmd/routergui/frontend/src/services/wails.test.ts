@@ -18,6 +18,8 @@ function makeRequest(): OperationRequest {
     RunDir: "",
     AckDeep: "",
     ToolVersion: "dev",
+    UseSavedPassword: false,
+    RememberPassword: false,
     HostKey: { KnownHostsPath: "", PinSHA256: "", AcceptNew: false },
   };
 }

@@ -38,11 +38,15 @@ const (
 	// CodeRecoveryReviewRequired blocks a device change after an uncertain one until it is acknowledged.
 	CodeRecoveryReviewRequired = "RECOVERY_REVIEW_REQUIRED"
 	// CodeStateStoreFailed means the write-ahead outcome record could not be read or stored.
-	CodeStateStoreFailed  = "STATE_STORE_FAILED"
-	CodeTelnetAuthFailed  = "TELNET_AUTH_FAILED"
-	CodeTelnetUnreachable = "TELNET_UNREACHABLE"
-	CodeCanceled          = "CANCELED"
-	CodeInternalError     = "INTERNAL_ERROR"
+	CodeStateStoreFailed = "STATE_STORE_FAILED"
+	// CodeCredentialNotFound means saved passwords were requested but no usable entry exists.
+	CodeCredentialNotFound = "CREDENTIAL_NOT_FOUND"
+	// CodeCredentialStoreFailed means the password vault could not be read, decrypted, or written.
+	CodeCredentialStoreFailed = "CREDENTIAL_STORE_FAILED"
+	CodeTelnetAuthFailed      = "TELNET_AUTH_FAILED"
+	CodeTelnetUnreachable     = "TELNET_UNREACHABLE"
+	CodeCanceled              = "CANCELED"
+	CodeInternalError         = "INTERNAL_ERROR"
 )
 
 // Error is a stable, frontend-independent device error.

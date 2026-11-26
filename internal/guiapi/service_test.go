@@ -8,28 +8,32 @@ import (
 	"testing"
 
 	"github.com/sunerpy/router-tools/internal/app"
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/guiapi"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 )
 
 type fakeApplication struct {
-	doctorRequest app.DoctorRequest
-	verifyRequest app.VerifyRequest
-	deepRequest   app.DeepRequest
-	doctorReport  app.DoctorReport
-	enableReport  app.EnableReport
-	enableErr     error
-	events        app.EventSink
-	ctx           context.Context
-	started       chan struct{}
-	guideRequest  app.GuideRequest
-	planReport    app.GuidePlanReport
-	planErr       error
-	applyRequest  app.GuideApplyRequest
-	applyReport   app.GuideApplyReport
-	applyErr      error
-	ackTarget     device.Target
+	doctorRequest     app.DoctorRequest
+	verifyRequest     app.VerifyRequest
+	deepRequest       app.DeepRequest
+	doctorReport      app.DoctorReport
+	enableReport      app.EnableReport
+	enableErr         error
+	events            app.EventSink
+	ctx               context.Context
+	started           chan struct{}
+	guideRequest      app.GuideRequest
+	planReport        app.GuidePlanReport
+	planErr           error
+	applyRequest      app.GuideApplyRequest
+	applyReport       app.GuideApplyReport
+	applyErr          error
+	ackTarget         device.Target
+	credentialEntries []credentials.Entry
+	forgetFilter      credentials.Filter
+	forgotAll         bool
 }
 
 func (f *fakeApplication) Doctor(ctx context.Context, request app.DoctorRequest, events app.EventSink) (app.DoctorReport, error) {
@@ -102,6 +106,20 @@ func (f *fakeApplication) GuideApply(_ context.Context, request app.GuideApplyRe
 func (f *fakeApplication) AcknowledgeRecovery(_ context.Context, target device.Target) (app.RecoveryReport, error) {
 	f.ackTarget = target
 	return app.RecoveryReport{Status: app.StatusSucceeded, Acknowledged: true}, nil
+}
+
+func (f *fakeApplication) ListCredentials() (app.CredentialReport, error) {
+	return app.CredentialReport{Operation: "credentials list", Status: app.StatusSucceeded, Entries: f.credentialEntries}, nil
+}
+
+func (f *fakeApplication) ForgetCredentials(filter credentials.Filter) (app.CredentialReport, error) {
+	f.forgetFilter = filter
+	return app.CredentialReport{Operation: "credentials forget", Status: app.StatusSucceeded}, nil
+}
+
+func (f *fakeApplication) ForgetAllCredentials() (app.CredentialReport, error) {
+	f.forgotAll = true
+	return app.CredentialReport{Operation: "credentials forget --all", Status: app.StatusSucceeded}, nil
 }
 
 func (f *fakeApplication) Catalog() []device.CatalogEntry {

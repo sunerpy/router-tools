@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/sunerpy/router-tools/internal/backup"
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 	"github.com/sunerpy/router-tools/internal/secret"
@@ -23,12 +24,15 @@ type BackupOnlineVerifyRequest struct {
 // BackupVerifyOnline first verifies local files, then compares current device evidence.
 func (s *Service) BackupVerifyOnline(ctx context.Context, request BackupOnlineVerifyRequest, events EventSink) (BackupVerifyReport, error) {
 	report := BackupVerifyReport{SchemaVersion: 1, Operation: "backup verify --online", Status: "running", Directory: request.BackupDir}
+	redactor := secret.NewRedactor(request.RootPassword.Expose())
+	var creds *credentialSession
 	fail := func(err error) (BackupVerifyReport, error) {
 		normalized := normalizeError(err)
 		redacted := *normalized
-		redacted.Message = secret.NewRedactor(request.RootPassword.Expose()).Text(redacted.Message)
+		redacted.Message = redactor.Text(redacted.Message)
 		report.Status = StatusFailed
 		report.Error = &redacted
+		report.Credentials = creds.report()
 		return report, &redacted
 	}
 	if err := backup.Verify(request.BackupDir); err != nil {
@@ -41,7 +45,7 @@ func (s *Service) BackupVerifyOnline(ctx context.Context, request BackupOnlineVe
 	if err := request.Target.Validate(); err != nil {
 		return fail(err)
 	}
-	if err := request.RootPassword.Validate(); err != nil {
+	if err := checkTypedPassword(request.RootPassword, request.Credentials); err != nil {
 		return fail(err)
 	}
 	if err := s.checkProfileID(request.ProfileID); err != nil {
@@ -58,11 +62,19 @@ func (s *Service) BackupVerifyOnline(ctx context.Context, request BackupOnlineVe
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "online backup verification is unavailable"})
 	}
-	observation := probe.Observation
-	observation.Hardware = backupIdentity(probe.Observation, adapter.Profile()).Hardware
-	if err := verifier.VerifyBackupOnline(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, manifest, observation, adapter.Profile().ID); err != nil {
+	creds = s.credentialSession(request.Credentials, request.Target, adapter.Profile(), redactor)
+	root, err := creds.root(request.RootPassword, false)
+	if err != nil {
 		return fail(err)
 	}
+	observation := probe.Observation
+	observation.Hardware = backupIdentity(probe.Observation, adapter.Profile()).Hardware
+	if err := verifier.VerifyBackupOnline(ctx, request.Target, root, creds.hostKeys(request.HostKeyPolicy), manifest, observation, adapter.Profile().ID); err != nil {
+		creds.observe(err)
+		return fail(err)
+	}
+	creds.remember(credentials.KindRoot)
+	report.Credentials = creds.report()
 	report.Valid = true
 	report.Status = StatusSucceeded
 	return report, nil

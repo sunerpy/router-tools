@@ -22,6 +22,7 @@
 - High-risk deep persistence with dedicated acknowledgement, verified backup, online layout check, operation lock, three-reboot journal, and final independent SSH verification.
 - Strict non-secret JSON configuration, per-router flock, private run reports, human and single-object JSON output.
 - A write-ahead recovery record per router that blocks further changes after an uncertain one until `recovery ack`.
+- Opt-in saved passwords in an AES-256-GCM vault (`--remember-password`, `--use-saved-password`, `credentials list|forget`), saved only after the router accepted them and never sent over Telnet.
 
 ## Command tree
 
@@ -41,8 +42,11 @@ routerctl
 │   ├── create [--output <new-directory>]
 │   └── verify --dir <directory> [--online]
 ├── deep-persist --backup-dir <verified-directory>
-└── recovery
-    └── ack
+├── recovery
+│   └── ack
+└── credentials
+    ├── list
+    └── forget [--kind] [--scope] [--host] [--port] | --all
 ```
 
 Run `routerctl <command> --help` for command flags. See [docs/usage.md](docs/usage.md) for secret input and examples.
@@ -118,7 +122,7 @@ Local artifacts are under `cmd/routergui/build/bin/`. `scripts/package-gui.sh wi
 
 ## Safety boundaries
 
-- Passwords are never accepted as literal CLI arguments or environment variables. Use a hidden prompt or pipe exactly the required lines from an approved secret provider.
+- Passwords are never accepted as literal CLI arguments or environment variables. Use a hidden prompt or pipe exactly the required lines from an approved secret provider. Saving them is opt-in; read the threat model in [RISKS.md](RISKS.md#saved-passwords).
 - An open TCP port is not authentication evidence. SSH success requires password authentication plus exact `id -u == 0`.
 - Unknown or changed SSH host keys fail closed. A host-key mismatch never falls back to Telnet.
 - Device changes require exact profile compatibility and a per-router non-blocking operation lock. Each change is recorded before its first write; after a partial, unknown or interrupted change, further changes are refused until you check the router and run `routerctl recovery ack`.

@@ -112,7 +112,7 @@ func (s FileStore) Load(key string) (Outcome, bool, error) {
 	if err := decoder.Decode(&outcome); err != nil {
 		return Outcome{}, false, fmt.Errorf("decode outcome record: %w", err)
 	}
-	if decoder.More() {
+	if len(bytes.TrimSpace(data[decoder.InputOffset():])) != 0 {
 		return Outcome{}, false, fmt.Errorf("outcome record has trailing data")
 	}
 	if err := validate(outcome); err != nil {

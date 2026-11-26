@@ -1,5 +1,39 @@
 export namespace app {
 	
+	export class CredentialNote {
+	    kind: string;
+	    action: string;
+	    error?: device.Error;
+	
+	    static createFrom(source: any = {}) {
+	        return new CredentialNote(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.action = source["action"];
+	        this.error = this.convertValues(source["error"], device.Error);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class BackupCreateReport {
 	    schema_version: number;
 	    operation: string;
@@ -9,6 +43,7 @@ export namespace app {
 	    profile: device.Profile;
 	    output_dir: string;
 	    manifest?: backup.Manifest;
+	    credentials?: CredentialNote[];
 	    error?: device.Error;
 	
 	    static createFrom(source: any = {}) {
@@ -25,6 +60,7 @@ export namespace app {
 	        this.profile = this.convertValues(source["profile"], device.Profile);
 	        this.output_dir = source["output_dir"];
 	        this.manifest = this.convertValues(source["manifest"], backup.Manifest);
+	        this.credentials = this.convertValues(source["credentials"], CredentialNote);
 	        this.error = this.convertValues(source["error"], device.Error);
 	    }
 	
@@ -52,6 +88,7 @@ export namespace app {
 	    status: string;
 	    directory: string;
 	    valid: boolean;
+	    credentials?: CredentialNote[];
 	    error?: device.Error;
 	
 	    static createFrom(source: any = {}) {
@@ -65,6 +102,7 @@ export namespace app {
 	        this.status = source["status"];
 	        this.directory = source["directory"];
 	        this.valid = source["valid"];
+	        this.credentials = this.convertValues(source["credentials"], CredentialNote);
 	        this.error = this.convertValues(source["error"], device.Error);
 	    }
 	
@@ -137,6 +175,45 @@ export namespace app {
 	        this.rom_version = source["rom_version"];
 	        this.profile_id = source["profile_id"];
 	    }
+	}
+	
+	export class CredentialReport {
+	    schema_version: number;
+	    operation: string;
+	    status: string;
+	    entries: credentials.Entry[];
+	    error?: device.Error;
+	
+	    static createFrom(source: any = {}) {
+	        return new CredentialReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema_version = source["schema_version"];
+	        this.operation = source["operation"];
+	        this.status = source["status"];
+	        this.entries = this.convertValues(source["entries"], credentials.Entry);
+	        this.error = this.convertValues(source["error"], device.Error);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class DeepResult {
 	    status: string;
@@ -243,6 +320,7 @@ export namespace app {
 	    telnet_root_verified: boolean;
 	    boot_id?: string;
 	    next_steps?: string[];
+	    credentials?: CredentialNote[];
 	    error?: device.Error;
 	
 	    static createFrom(source: any = {}) {
@@ -268,6 +346,7 @@ export namespace app {
 	        this.telnet_root_verified = source["telnet_root_verified"];
 	        this.boot_id = source["boot_id"];
 	        this.next_steps = source["next_steps"];
+	        this.credentials = this.convertValues(source["credentials"], CredentialNote);
 	        this.error = this.convertValues(source["error"], device.Error);
 	    }
 	
@@ -302,6 +381,7 @@ export namespace app {
 	    attempted_macs?: string[];
 	    cleanup?: CleanupResult[];
 	    warnings?: string[];
+	    credentials?: CredentialNote[];
 	    error?: device.Error;
 	
 	    static createFrom(source: any = {}) {
@@ -322,6 +402,7 @@ export namespace app {
 	        this.attempted_macs = source["attempted_macs"];
 	        this.cleanup = this.convertValues(source["cleanup"], CleanupResult);
 	        this.warnings = source["warnings"];
+	        this.credentials = this.convertValues(source["credentials"], CredentialNote);
 	        this.error = this.convertValues(source["error"], device.Error);
 	    }
 	
@@ -371,6 +452,7 @@ export namespace app {
 	    device: device.Observation;
 	    profile: device.Profile;
 	    result: RebootResult;
+	    credentials?: CredentialNote[];
 	    error?: device.Error;
 	
 	    static createFrom(source: any = {}) {
@@ -386,6 +468,7 @@ export namespace app {
 	        this.device = this.convertValues(source["device"], device.Observation);
 	        this.profile = this.convertValues(source["profile"], device.Profile);
 	        this.result = this.convertValues(source["result"], RebootResult);
+	        this.credentials = this.convertValues(source["credentials"], CredentialNote);
 	        this.error = this.convertValues(source["error"], device.Error);
 	    }
 	
@@ -435,6 +518,7 @@ export namespace app {
 	    device: device.Observation;
 	    profile: device.Profile;
 	    result: SoftResult;
+	    credentials?: CredentialNote[];
 	    error?: device.Error;
 	
 	    static createFrom(source: any = {}) {
@@ -450,6 +534,7 @@ export namespace app {
 	        this.device = this.convertValues(source["device"], device.Observation);
 	        this.profile = this.convertValues(source["profile"], device.Profile);
 	        this.result = this.convertValues(source["result"], SoftResult);
+	        this.credentials = this.convertValues(source["credentials"], CredentialNote);
 	        this.error = this.convertValues(source["error"], device.Error);
 	    }
 	
@@ -690,6 +775,8 @@ export namespace app {
 	    recovery?: state.Outcome;
 	    recovery_blocked: boolean;
 	    locked: boolean;
+	    saved_admin: boolean;
+	    saved_root: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GuideState(source);
@@ -705,6 +792,8 @@ export namespace app {
 	        this.recovery = this.convertValues(source["recovery"], state.Outcome);
 	        this.recovery_blocked = source["recovery_blocked"];
 	        this.locked = source["locked"];
+	        this.saved_admin = source["saved_admin"];
+	        this.saved_root = source["saved_root"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -741,6 +830,7 @@ export namespace app {
 	    required_inputs?: string[];
 	    confirmation?: GuideConfirmation;
 	    plan_digest?: string;
+	    credentials?: CredentialNote[];
 	    error?: device.Error;
 	
 	    static createFrom(source: any = {}) {
@@ -764,6 +854,7 @@ export namespace app {
 	        this.required_inputs = source["required_inputs"];
 	        this.confirmation = this.convertValues(source["confirmation"], GuideConfirmation);
 	        this.plan_digest = source["plan_digest"];
+	        this.credentials = this.convertValues(source["credentials"], CredentialNote);
 	        this.error = this.convertValues(source["error"], device.Error);
 	    }
 	
@@ -847,6 +938,7 @@ export namespace app {
 	    ssh_verified: boolean;
 	    telnet_root_verified: boolean;
 	    boot_id?: string;
+	    credentials?: CredentialNote[];
 	    error?: device.Error;
 	
 	    static createFrom(source: any = {}) {
@@ -866,6 +958,7 @@ export namespace app {
 	        this.ssh_verified = source["ssh_verified"];
 	        this.telnet_root_verified = source["telnet_root_verified"];
 	        this.boot_id = source["boot_id"];
+	        this.credentials = this.convertValues(source["credentials"], CredentialNote);
 	        this.error = this.convertValues(source["error"], device.Error);
 	    }
 	
@@ -959,6 +1052,53 @@ export namespace backup {
 	        this.boot_id = source["boot_id"];
 	        this.mtd_text_file = source["mtd_text_file"];
 	        this.partitions = this.convertValues(source["partitions"], Partition);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace credentials {
+	
+	export class Entry {
+	    kind: string;
+	    scope: string;
+	    host: string;
+	    port: number;
+	    // Go type: time
+	    saved_at: any;
+	    // Go type: time
+	    rejected_at: any;
+	
+	    static createFrom(source: any = {}) {
+	        return new Entry(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.kind = source["kind"];
+	        this.scope = source["scope"];
+	        this.host = source["host"];
+	        this.port = source["port"];
+	        this.saved_at = this.convertValues(source["saved_at"], null);
+	        this.rejected_at = this.convertValues(source["rejected_at"], null);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1175,6 +1315,24 @@ export namespace device {
 
 export namespace guiapi {
 	
+	export class CredentialFilter {
+	    Kind: string;
+	    Scope: string;
+	    Host: string;
+	    Port: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new CredentialFilter(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.Kind = source["Kind"];
+	        this.Scope = source["Scope"];
+	        this.Host = source["Host"];
+	        this.Port = source["Port"];
+	    }
+	}
 	export class HostKeyRequest {
 	    KnownHostsPath: string;
 	    PinSHA256: string;
@@ -1204,6 +1362,8 @@ export namespace guiapi {
 	    Confirmed: boolean;
 	    ToolVersion: string;
 	    HostKey: HostKeyRequest;
+	    UseSavedPassword: boolean;
+	    RememberPassword: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new GuideRequest(source);
@@ -1223,6 +1383,8 @@ export namespace guiapi {
 	        this.Confirmed = source["Confirmed"];
 	        this.ToolVersion = source["ToolVersion"];
 	        this.HostKey = this.convertValues(source["HostKey"], HostKeyRequest);
+	        this.UseSavedPassword = source["UseSavedPassword"];
+	        this.RememberPassword = source["RememberPassword"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -1298,6 +1460,8 @@ export namespace guiapi {
 	    AckDeep: string;
 	    ToolVersion: string;
 	    HostKey: HostKeyRequest;
+	    UseSavedPassword: boolean;
+	    RememberPassword: boolean;
 	
 	    static createFrom(source: any = {}) {
 	        return new OperationRequest(source);
@@ -1321,6 +1485,8 @@ export namespace guiapi {
 	        this.AckDeep = source["AckDeep"];
 	        this.ToolVersion = source["ToolVersion"];
 	        this.HostKey = this.convertValues(source["HostKey"], HostKeyRequest);
+	        this.UseSavedPassword = source["UseSavedPassword"];
+	        this.RememberPassword = source["RememberPassword"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

@@ -78,6 +78,8 @@ func ExecuteWithInput(
 	knownHostsPath := cfg.KnownHostsFile
 	yes := false
 	ackDeep := ""
+	useSavedPassword := false
+	rememberPassword := false
 	redactor := secret.NewRedactor()
 
 	root := &cobra.Command{
@@ -107,6 +109,17 @@ func ExecuteWithInput(
 	flags.StringVar(&runDir, "run-dir", runDir, "operation report and journal directory")
 	flags.BoolVar(&yes, "yes", false, "confirm ordinary device changes")
 	flags.StringVar(&ackDeep, "ack-deep", "", "deep-persist acknowledgement phrase")
+	flags.BoolVar(&useSavedPassword, "use-saved-password", false, "fill passwords that are not typed from the encrypted vault")
+	flags.BoolVar(&rememberPassword, "remember-password", false, "save typed passwords to the encrypted vault after the router accepted them")
+	options := &operationOptions{
+		target: &target, profileID: &profileID, jsonOutput: &jsonOutput,
+		stdin: stdin, service: service, info: info, redactor: redactor,
+		nonInteractive: &nonInteractive, adminPasswordStdin: &adminPasswordStdin,
+		rootPasswordStdin: &rootPasswordStdin, allowTelnet: &allowTelnet,
+		acceptNewHostKey: &acceptNewHostKey, hostKeySHA256: &hostKeySHA256,
+		knownHostsPath: &knownHostsPath, yes: &yes, ackDeep: &ackDeep, runDir: &runDir,
+		useSaved: &useSavedPassword, remember: &rememberPassword,
+	}
 
 	root.AddCommand(&cobra.Command{
 		Use:   "profiles",
@@ -145,20 +158,16 @@ func ExecuteWithInput(
 			var adminPassword secret.Password
 			if withAdminAuth {
 				var err error
-				adminPassword, err = readAdminPassword(stdin, cmd.ErrOrStderr(), adminPasswordStdin, nonInteractive)
-				if err != nil {
-					return &ExitError{Code: exitCode(err), Err: err}
+				if adminPassword, err = options.adminPassword(cmd); err != nil {
+					return err
 				}
-				redactor.Add(adminPassword.Expose())
 			}
 			var rootPassword secret.Password
 			if withRootVerify {
 				var err error
-				rootPassword, err = readRootPassword(stdin, cmd.ErrOrStderr(), rootPasswordStdin, nonInteractive)
-				if err != nil {
-					return &ExitError{Code: exitCode(err), Err: err}
+				if rootPassword, err = options.rootPassword(cmd); err != nil {
+					return err
 				}
-				redactor.Add(rootPassword.Expose())
 			}
 			events := app.EventSinkFunc(func(event app.Event) {
 				message := fmt.Sprintf("%s: %s (%s)\n", event.Operation, event.Stage, event.Status)
@@ -184,6 +193,7 @@ func ExecuteWithInput(
 				WithAdminAuth: withAdminAuth, AdminPassword: adminPassword,
 				WithRootVerify: withRootVerify, RootPassword: rootPassword,
 				Transport: transport, AllowTelnet: allowTelnet, HostKeyPolicy: policy,
+				Credentials: options.credentialUse(),
 			}, events)
 			var output bytes.Buffer
 			if renderErr := renderDoctor(&output, report, jsonOutput); renderErr != nil {
@@ -215,11 +225,10 @@ func ExecuteWithInput(
 			if !ok {
 				return &ExitError{Code: 12, Err: fmt.Errorf("verify service is not configured")}
 			}
-			rootPassword, err := readRootPassword(stdin, cmd.ErrOrStderr(), rootPasswordStdin, nonInteractive)
+			rootPassword, err := options.rootPassword(cmd)
 			if err != nil {
-				return &ExitError{Code: exitCode(err), Err: err}
+				return err
 			}
-			redactor.Add(rootPassword.Expose())
 			if allowTelnet {
 				_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Warning: Telnet transmits credentials and commands in plaintext on the local network")
 			}
@@ -249,6 +258,7 @@ func ExecuteWithInput(
 				Transport:     cmd.Flags().Lookup("transport").Value.String(),
 				AllowTelnet:   allowTelnet,
 				HostKeyPolicy: policy,
+				Credentials:   options.credentialUse(),
 			}, events)
 			var output bytes.Buffer
 			if renderErr := renderVerify(&output, report, jsonOutput); renderErr != nil {
@@ -268,16 +278,9 @@ func ExecuteWithInput(
 	}
 	verifyCommand.Flags().String("transport", "ssh", "shell transport: ssh, telnet, or auto")
 	root.AddCommand(verifyCommand)
-	options := &operationOptions{
-		target: &target, profileID: &profileID, jsonOutput: &jsonOutput,
-		stdin: stdin, service: service, info: info, redactor: redactor,
-		nonInteractive: &nonInteractive, adminPasswordStdin: &adminPasswordStdin,
-		rootPasswordStdin: &rootPasswordStdin, allowTelnet: &allowTelnet,
-		acceptNewHostKey: &acceptNewHostKey, hostKeySHA256: &hostKeySHA256,
-		knownHostsPath: &knownHostsPath, yes: &yes, ackDeep: &ackDeep, runDir: &runDir,
-	}
 	addOperationCommands(root, options)
 	addGuideCommands(root, options)
+	addCredentialCommands(root, options)
 
 	if err := root.ExecuteContext(ctx); err != nil {
 		_, _ = fmt.Fprint(stderr, redactor.Text(fmt.Sprintf("Error: %v\n", err)))
@@ -339,6 +342,9 @@ func renderDoctor(writer io.Writer, report app.DoctorReport, jsonOutput bool) er
 		return err
 	}
 	if err := renderCandidates(writer, report.Candidates); err != nil {
+		return err
+	}
+	if err := renderCredentialNotes(writer, report.Credentials); err != nil {
 		return err
 	}
 	if report.Error != nil {
@@ -410,6 +416,9 @@ func renderVerify(writer io.Writer, report app.VerifyReport, jsonOutput bool) er
 			return err
 		}
 	}
+	if err := renderCredentialNotes(writer, report.Credentials); err != nil {
+		return err
+	}
 	if report.Error != nil {
 		_, err := fmt.Fprintf(writer, "Error: %s: %s\n", report.Error.Code, report.Error.Message)
 		return err
@@ -458,9 +467,12 @@ func exitCode(err error) int {
 		device.CodeBackupMissing,
 		device.CodeRecoveryReviewRequired:
 		return 9
+	case device.CodeCredentialNotFound:
+		return 2
 	case device.CodeRemoteResultUnknown, device.CodeMACCleanupFailed:
 		return 10
-	case device.CodeBackupIncomplete, device.CodeBackupHashMismatch, device.CodeBackupLayoutMismatch, device.CodeStateStoreFailed:
+	case device.CodeBackupIncomplete, device.CodeBackupHashMismatch, device.CodeBackupLayoutMismatch, device.CodeStateStoreFailed,
+		device.CodeCredentialStoreFailed:
 		return 11
 	case device.CodeUnsupportedDevice,
 		device.CodeUnsupportedFirmware,

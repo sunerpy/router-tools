@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 	"github.com/sunerpy/router-tools/internal/secret"
@@ -31,6 +32,7 @@ type VerifyRequest struct {
 	Transport     string
 	AllowTelnet   bool
 	HostKeyPolicy hostkey.Policy
+	Credentials   CredentialUse
 }
 
 // VerifyReport distinguishes SSH success from Telnet-only success.
@@ -46,6 +48,7 @@ type VerifyReport struct {
 	SSHVerified        bool               `json:"ssh_verified"`
 	TelnetRootVerified bool               `json:"telnet_root_verified"`
 	BootID             string             `json:"boot_id,omitempty"`
+	Credentials        []CredentialNote   `json:"credentials,omitempty"`
 	Error              *device.Error      `json:"error,omitempty"`
 }
 
@@ -56,12 +59,15 @@ func (s *Service) Verify(ctx context.Context, request VerifyRequest, events Even
 	}
 	report := VerifyReport{SchemaVersion: 1, Operation: "verify", Status: "running", Host: request.Target.Host, Transport: request.Transport}
 	emit := operationEmitter("verify", events)
+	redactor := secret.NewRedactor(request.RootPassword.Expose())
+	var creds *credentialSession
 	fail := func(err error) (VerifyReport, error) {
 		normalized := normalizeError(err)
 		redacted := *normalized
-		redacted.Message = secret.NewRedactor(request.RootPassword.Expose()).Text(redacted.Message)
+		redacted.Message = redactor.Text(redacted.Message)
 		report.Status = StatusFailed
 		report.Error = &redacted
+		report.Credentials = creds.report()
 		emit("failed", StatusFailed)
 		return report, &redacted
 	}
@@ -69,7 +75,7 @@ func (s *Service) Verify(ctx context.Context, request VerifyRequest, events Even
 	if err := request.Target.Validate(); err != nil {
 		return fail(err)
 	}
-	if err := request.RootPassword.Validate(); err != nil {
+	if err := checkTypedPassword(request.RootPassword, request.Credentials); err != nil {
 		return fail(err)
 	}
 	if request.Transport != "ssh" && request.Transport != "telnet" && request.Transport != "auto" {
@@ -100,9 +106,15 @@ func (s *Service) Verify(ctx context.Context, request VerifyRequest, events Even
 	if !ok {
 		return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "the selected prober does not support root verification"})
 	}
-	emit("root_verify", "running")
-	result, err := verifier.VerifyRoot(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, request.Transport, request.AllowTelnet)
+	creds = s.credentialSession(request.Credentials, request.Target, report.Profile, redactor)
+	root, err := creds.root(request.RootPassword, request.AllowTelnet)
 	if err != nil {
+		return fail(err)
+	}
+	emit("root_verify", "running")
+	result, err := verifier.VerifyRoot(ctx, request.Target, root, creds.hostKeys(request.HostKeyPolicy), request.Transport, request.AllowTelnet)
+	if err != nil {
+		creds.observe(err)
 		return fail(err)
 	}
 	report.Transport = result.Transport
@@ -113,6 +125,10 @@ func (s *Service) Verify(ctx context.Context, request VerifyRequest, events Even
 	if !report.RootVerified {
 		return fail(&device.Error{Code: device.CodeRootVerifyFailed, Message: "root verification did not succeed"})
 	}
+	if report.SSHVerified {
+		creds.remember(credentials.KindRoot)
+	}
+	report.Credentials = creds.report()
 	report.Status = StatusSucceeded
 	emit("completed", StatusSucceeded)
 	return report, nil

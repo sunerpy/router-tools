@@ -8,7 +8,9 @@ import (
 
 	"github.com/sunerpy/router-tools/internal/app"
 	"github.com/sunerpy/router-tools/internal/cli"
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
+	"github.com/sunerpy/router-tools/internal/secret"
 	"github.com/sunerpy/router-tools/internal/state"
 	"github.com/sunerpy/router-tools/internal/wiring"
 )
@@ -26,6 +28,7 @@ var (
 	_ cli.DeepService         = (*app.Service)(nil)
 	_ cli.GuideService        = (*app.Service)(nil)
 	_ cli.RecoveryService     = (*app.Service)(nil)
+	_ cli.CredentialService   = (*app.Service)(nil)
 )
 
 func isolateUserDirs(t *testing.T) string {
@@ -53,6 +56,7 @@ func TestPathsAreManagedUnderTheUserDirectories(t *testing.T) {
 		State:       filepath.Join(configDir, "routerctl", "state"),
 		DeepJournal: filepath.Join(configDir, "routerctl", "deep"),
 		Backups:     filepath.Join(home, "RouterTools", "backups"),
+		Credentials: filepath.Join(configDir, "routerctl", "credentials"),
 	}
 	if paths != want {
 		t.Fatalf("DefaultPaths() = %+v, want %+v", paths, want)
@@ -83,5 +87,13 @@ func TestProductionServiceUsesTheOutcomeStore(t *testing.T) {
 	}
 	if len(service.Catalog()) == 0 {
 		t.Fatal("the production service has no registered profiles")
+	}
+	vault := credentials.FileVault{Dir: paths.Credentials}
+	root, _ := secret.NewPassword("root-secret")
+	if err := vault.Put(credentials.NewKey(credentials.KindRoot, "xiaomi-rd08", "192.168.31.1", 22), root, at); err != nil {
+		t.Fatal(err)
+	}
+	if list, err := service.ListCredentials(); err != nil || len(list.Entries) != 1 {
+		t.Fatalf("ListCredentials() = %+v, %v; want the managed vault", list, err)
 	}
 }

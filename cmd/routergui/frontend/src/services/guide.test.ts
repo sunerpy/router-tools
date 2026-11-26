@@ -15,6 +15,8 @@ function guideRequest(overrides: Partial<GuideRequest> = {}): GuideRequest {
     Confirmed: false,
     ToolVersion: "dev",
     HostKey: { KnownHostsPath: "", PinSHA256: "", AcceptNew: false },
+    UseSavedPassword: false,
+    RememberPassword: false,
     ...overrides,
   };
 }
@@ -110,6 +112,8 @@ describe("preview guided flow", () => {
         Confirmation: plan.confirmation!,
         PlanDigest: plan.plan_digest!,
         Confirmed: true,
+        AdminPassword: "admin-secret",
+        RootPassword: "root-secret",
       }),
     );
     expect(report.status).toBe("partial");
@@ -140,6 +144,8 @@ describe("preview guided flow", () => {
       AckDeep: "",
       ToolVersion: "dev",
       HostKey: { KnownHostsPath: "", PinSHA256: "", AcceptNew: false },
+      UseSavedPassword: false,
+      RememberPassword: false,
     });
     expect(report.acknowledged).toBe(true);
     expect((await api.ListReports())[0].operation).toBe("recovery ack");

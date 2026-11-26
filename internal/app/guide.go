@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 	"github.com/sunerpy/router-tools/internal/secret"
@@ -22,6 +23,9 @@ type GuideRequest struct {
 	// ResetRootPassword lets the enable flow change an unknown root password while SSH is open.
 	ResetRootPassword bool
 	HostKeyPolicy     hostkey.Policy
+	// Credentials may fill the root password used for detection; Remember saves a typed one once SSH root
+	// verification accepted it.
+	Credentials CredentialUse
 }
 
 // GuideState is the read-only evidence a plan is based on.
@@ -34,6 +38,10 @@ type GuideState struct {
 	Recovery        *state.Outcome   `json:"recovery,omitempty"`
 	RecoveryBlocked bool             `json:"recovery_blocked"`
 	Locked          bool             `json:"locked"`
+	// SavedAdmin and SavedRoot: a usable saved password exists and will be filled in, so the plan does
+	// not ask for it. They are only set when the request uses saved passwords.
+	SavedAdmin bool `json:"saved_admin"`
+	SavedRoot  bool `json:"saved_root"`
 }
 
 // GuidePlanReport lists the steps a guided run would take. Confirmation and PlanDigest are present only
@@ -54,6 +62,7 @@ type GuidePlanReport struct {
 	RequiredInputs []string              `json:"required_inputs,omitempty"`
 	Confirmation   *GuideConfirmation    `json:"confirmation,omitempty"`
 	PlanDigest     string                `json:"plan_digest,omitempty"`
+	Credentials    []CredentialNote      `json:"credentials,omitempty"`
 	Error          *device.Error         `json:"error,omitempty"`
 }
 
@@ -70,6 +79,7 @@ func (s *Service) guidePlan(ctx context.Context, request GuideRequest, emit func
 	}
 	facts := guideFacts{RootSSH: RootSSHNotChecked, Reset: request.ResetRootPassword, BackupManaged: s.backupRoot != ""}
 	redactor := secret.NewRedactor(request.RootPassword.Expose())
+	var creds *credentialSession
 	fail := func(err error, block string) (GuidePlanReport, device.Adapter, error) {
 		normalized := normalizeError(err)
 		redacted := *normalized
@@ -81,6 +91,7 @@ func (s *Service) guidePlan(ctx context.Context, request GuideRequest, emit func
 		}
 		report.Status = StatusFailed
 		report.Error = &redacted
+		report.Credentials = creds.report()
 		emit("failed", StatusFailed)
 		return report, device.Adapter{}, &redacted
 	}
@@ -145,6 +156,22 @@ func (s *Service) guidePlan(ctx context.Context, request GuideRequest, emit func
 	}
 	profile := adapter.Profile()
 	report.Profile, facts.Profile = profile, profile
+	creds = s.credentialSession(request.Credentials, request.Target, profile, redactor)
+	root := request.RootPassword
+	if hasRoot {
+		// Registers the typed password, so Remember can save it once SSH root verification accepts it.
+		root, _ = creds.root(request.RootPassword, false)
+	} else if request.Credentials.UseSaved {
+		saved, err := creds.root(secret.Password{}, false)
+		switch {
+		case err == nil:
+			root, hasRoot = saved, true
+		case hasCode(err, device.CodeCredentialNotFound):
+		default:
+			creds.notes = append(creds.notes, CredentialNote{Kind: "root", Action: CredentialUnavailable, Error: normalizeError(err)})
+		}
+	}
+	policy := creds.hostKeys(request.HostKeyPolicy)
 
 	// Root evidence comes from a password-authenticated SSH shell only; Telnet never counts.
 	if hasRoot && probe.SSH == device.PortOpen && profile.Supports(device.CapabilityVerify) {
@@ -153,10 +180,12 @@ func (s *Service) guidePlan(ctx context.Context, request GuideRequest, emit func
 			return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "root verification is unavailable"}, ReasonCapabilityMissing)
 		}
 		emit("root_verify", "running")
-		result, err := verifier.VerifyRoot(ctx, request.Target, request.RootPassword, request.HostKeyPolicy, "ssh", false)
+		result, err := verifier.VerifyRoot(ctx, request.Target, root, policy, "ssh", false)
+		creds.observe(err)
 		switch {
 		case err == nil && result.RootVerified && result.Transport == "ssh":
 			facts.RootSSH = RootSSHVerified
+			creds.remember(credentials.KindRoot)
 		case err == nil:
 			return fail(&device.Error{Code: device.CodeRootVerifyFailed, Message: "root verification did not succeed"}, ReasonDetectionFailed)
 		case hasCode(err, device.CodeSSHAuthFailed):
@@ -174,7 +203,7 @@ func (s *Service) guidePlan(ctx context.Context, request GuideRequest, emit func
 			return fail(&device.Error{Code: device.CodeUnsupportedCapability, Message: "soft persistence inspection is unavailable"}, ReasonCapabilityMissing)
 		}
 		emit("inspect", "running")
-		soft, err := inspector.InspectSoft(ctx, request.Target, request.RootPassword, request.HostKeyPolicy)
+		soft, err := inspector.InspectSoft(ctx, request.Target, root, policy)
 		if err != nil {
 			if hasCode(err, device.CodeHostKeyMismatch, device.CodeSSHHostKeyRejected) {
 				return fail(err, ReasonHostKeyRejected)
@@ -190,7 +219,14 @@ func (s *Service) guidePlan(ctx context.Context, request GuideRequest, emit func
 
 	facts.Goals = goals
 	report.Steps = planSteps(facts)
-	report.RequiredInputs = requiredInputs(report.Steps)
+	report.State.SavedRoot = creds.savedRoot() && facts.RootSSH == RootSSHVerified
+	for _, step := range report.Steps {
+		if step.ID == StepEnableSSH && step.Action == ActionRun {
+			report.State.SavedAdmin = creds.available(credentials.KindWebAdmin, request.Target.WebPort)
+		}
+	}
+	report.RequiredInputs = withoutSaved(requiredInputs(report.Steps), report.State)
+	report.Credentials = creds.report()
 	report.Ready, report.Changes = planReadiness(report.Steps)
 	if err := stepBlockError(report.Steps); err != nil {
 		report.Status = StatusFailed
@@ -244,6 +280,18 @@ func softBlockError(step GuideStep) *device.Error {
 		action = "remove the soft persistence first, then detect again"
 	}
 	return &device.Error{Code: device.CodeSoftConfigConflict, Message: fmt.Sprintf("soft persistence is in state %s; %s", step.Reason, action)}
+}
+
+// withoutSaved drops the inputs a usable saved password provides. The new root password is never saved.
+func withoutSaved(inputs []string, state GuideState) []string {
+	var kept []string
+	for _, input := range inputs {
+		if (input == InputAdminPassword && state.SavedAdmin) || (input == InputRootPassword && state.SavedRoot) {
+			continue
+		}
+		kept = append(kept, input)
+	}
+	return kept
 }
 
 func confirmedSteps(steps []GuideStep) []GuideConfirmedStep {

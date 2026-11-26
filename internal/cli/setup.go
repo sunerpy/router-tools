@@ -93,7 +93,7 @@ func (o *operationOptions) runSetup(cmd *cobra.Command, _ []string) error {
 
 	request := app.GuideRequest{
 		Target: *o.target, ProfileID: *o.profileID, Goals: goals, RootPassword: root,
-		ResetRootPassword: reset, HostKeyPolicy: o.hostPolicy(cmd),
+		ResetRootPassword: reset, HostKeyPolicy: o.hostPolicy(cmd), Credentials: o.credentialUse(),
 	}
 	plan, err := service.GuidePlan(cmd.Context(), request, o.events(cmd))
 	if err == nil && !planOnly && enableNeedsInput(plan) && root.Expose() == "" {
@@ -126,7 +126,7 @@ func (o *operationOptions) runSetup(cmd *cobra.Command, _ []string) error {
 	}
 
 	if enableRuns(plan) {
-		if admin.Expose() == "" {
+		if admin.Expose() == "" && !plan.State.SavedAdmin {
 			if admin, err = read("Admin password", "non-interactive setup requires --admin-password-stdin", false); err != nil {
 				return err
 			}
@@ -136,7 +136,7 @@ func (o *operationOptions) runSetup(cmd *cobra.Command, _ []string) error {
 				return err
 			}
 		}
-	} else if root.Expose() == "" {
+	} else if root.Expose() == "" && !plan.State.SavedRoot {
 		if root, err = read("Root password", "non-interactive setup requires --root-password-stdin", false); err != nil {
 			return err
 		}
@@ -150,6 +150,7 @@ func (o *operationOptions) runSetup(cmd *cobra.Command, _ []string) error {
 	report, err := service.GuideApply(cmd.Context(), app.GuideApplyRequest{
 		Confirmation: *plan.Confirmation, PlanDigest: plan.PlanDigest, Confirmed: confirmed,
 		AdminPassword: admin, RootPassword: root, HostKeyPolicy: o.hostPolicy(cmd), ToolVersion: o.info.Version,
+		Credentials: o.credentialUse(),
 	}, o.events(cmd))
 	return o.finish(cmd, report, err)
 }
@@ -285,6 +286,9 @@ func renderGuidePlan(writer io.Writer, plan app.GuidePlanReport) error {
 	if _, err := io.WriteString(writer, b.String()); err != nil {
 		return err
 	}
+	if err := renderCredentialNotes(writer, plan.Credentials); err != nil {
+		return err
+	}
 	if err := renderOperationError(writer, plan.Error); err != nil {
 		return err
 	}
@@ -314,6 +318,11 @@ func renderGuideApply(writer io.Writer, report app.GuideApplyReport) error {
 	if _, err := io.WriteString(writer, b.String()); err != nil {
 		return err
 	}
+	for _, step := range report.Steps {
+		if err := renderCredentialNotes(writer, stepCredentialNotes(step)); err != nil {
+			return err
+		}
+	}
 	return renderOperationError(writer, report.Error)
 }
 
@@ -336,4 +345,19 @@ func valueOr(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+// stepCredentialNotes returns the saved-password notes of a guided step's use-case report.
+func stepCredentialNotes(step app.GuideStepResult) []app.CredentialNote {
+	switch {
+	case step.Enable != nil:
+		return step.Enable.Credentials
+	case step.Backup != nil:
+		return step.Backup.Credentials
+	case step.Soft != nil:
+		return step.Soft.Credentials
+	case step.Reboot != nil:
+		return step.Reboot.Credentials
+	}
+	return nil
 }

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/sunerpy/router-tools/internal/app"
+	"github.com/sunerpy/router-tools/internal/credentials"
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/safety/hostkey"
 	"github.com/sunerpy/router-tools/internal/secret"
@@ -32,6 +33,9 @@ type Application interface {
 	GuidePlan(context.Context, app.GuideRequest, app.EventSink) (app.GuidePlanReport, error)
 	GuideApply(context.Context, app.GuideApplyRequest, app.EventSink) (app.GuideApplyReport, error)
 	AcknowledgeRecovery(context.Context, device.Target) (app.RecoveryReport, error)
+	ListCredentials() (app.CredentialReport, error)
+	ForgetCredentials(credentials.Filter) (app.CredentialReport, error)
+	ForgetAllCredentials() (app.CredentialReport, error)
 	Catalog() []device.CatalogEntry
 }
 
@@ -70,6 +74,14 @@ type OperationRequest struct {
 	AckDeep        string
 	ToolVersion    string
 	HostKey        HostKeyRequest
+	// UseSavedPassword fills passwords left empty from the vault; RememberPassword saves typed ones after
+	// the router accepted them. Deep persistence ignores both and always needs the typed root password.
+	UseSavedPassword bool
+	RememberPassword bool
+}
+
+func (r OperationRequest) credentials() app.CredentialUse {
+	return app.CredentialUse{UseSaved: r.UseSavedPassword, Remember: r.RememberPassword}
 }
 
 // GuideRequest is the desktop DTO of a guided plan or run. Password strings are converted immediately;
@@ -87,6 +99,20 @@ type GuideRequest struct {
 	Confirmed         bool
 	ToolVersion       string
 	HostKey           HostKeyRequest
+	UseSavedPassword  bool
+	RememberPassword  bool
+}
+
+func (r GuideRequest) credentials() app.CredentialUse {
+	return app.CredentialUse{UseSaved: r.UseSavedPassword, Remember: r.RememberPassword}
+}
+
+// CredentialFilter selects saved passwords to forget; empty fields match every entry.
+type CredentialFilter struct {
+	Kind  string
+	Scope string
+	Host  string
+	Port  int
 }
 
 // HistoryEntry contains a report, never the originating secrets.
@@ -155,7 +181,7 @@ func (s *Service) Doctor(ctx context.Context, request OperationRequest) (app.Doc
 		WithAdminAuth: request.WithAdminAuth, AdminPassword: admin,
 		WithRootVerify: request.WithRootVerify, RootPassword: root,
 		Transport: request.Transport, AllowTelnet: request.AllowTelnet,
-		HostKeyPolicy: s.hostPolicy(request),
+		HostKeyPolicy: s.hostPolicy(request), Credentials: request.credentials(),
 	}, s.events(request.OperationID))
 	return report, s.settle(request.OperationID, "doctor", report, report.Status, err)
 }
@@ -174,6 +200,7 @@ func (s *Service) Verify(ctx context.Context, request OperationRequest) (app.Ver
 	report, err := s.application.Verify(operationCtx, app.VerifyRequest{
 		Target: request.Target, ProfileID: request.ProfileID, RootPassword: root,
 		Transport: request.Transport, AllowTelnet: request.AllowTelnet, HostKeyPolicy: s.hostPolicy(request),
+		Credentials: request.credentials(),
 	}, s.events(request.OperationID))
 	return report, s.settle(request.OperationID, "verify", report, report.Status, err)
 }
@@ -196,7 +223,7 @@ func (s *Service) EnableSSH(ctx context.Context, request OperationRequest) (app.
 	report, err := s.application.EnableSSH(operationCtx, app.EnableRequest{
 		Target: request.Target, ProfileID: request.ProfileID,
 		AdminPassword: admin, RootPassword: root,
-		HostKeyPolicy: s.hostPolicy(request), Confirmed: request.Confirmed,
+		HostKeyPolicy: s.hostPolicy(request), Confirmed: request.Confirmed, Credentials: request.credentials(),
 	}, s.events(request.OperationID))
 	return report, s.settle(request.OperationID, "enable", report, report.Status, err)
 }
@@ -228,6 +255,7 @@ func (s *Service) soft(ctx context.Context, request OperationRequest, remove boo
 	applicationRequest := app.SoftRequest{
 		Target: request.Target, ProfileID: request.ProfileID, RootPassword: root,
 		HostKeyPolicy: s.hostPolicy(request), AllowTelnet: request.AllowTelnet, Confirmed: request.Confirmed,
+		Credentials: request.credentials(),
 	}
 	var report app.SoftReport
 	if remove {
@@ -252,6 +280,7 @@ func (s *Service) RebootVerify(ctx context.Context, request OperationRequest) (a
 	report, err := s.application.RebootVerify(operationCtx, app.SoftRequest{
 		Target: request.Target, ProfileID: request.ProfileID, RootPassword: root,
 		HostKeyPolicy: s.hostPolicy(request), AllowTelnet: request.AllowTelnet, Confirmed: request.Confirmed,
+		Credentials: request.credentials(),
 	}, s.events(request.OperationID))
 	return report, s.settle(request.OperationID, "reboot-verify", report, report.Status, err)
 }
@@ -270,6 +299,7 @@ func (s *Service) BackupCreate(ctx context.Context, request OperationRequest) (a
 	report, err := s.application.BackupCreate(operationCtx, app.BackupCreateRequest{
 		Target: request.Target, ProfileID: request.ProfileID, RootPassword: root,
 		HostKeyPolicy: s.hostPolicy(request), OutputDir: request.OutputDir, ToolVersion: request.ToolVersion,
+		Credentials: request.credentials(),
 	}, s.events(request.OperationID))
 	return report, s.settle(request.OperationID, "backup create", report, report.Status, err)
 }
@@ -299,7 +329,7 @@ func (s *Service) BackupVerifyOnline(ctx context.Context, request OperationReque
 	report, err := s.application.BackupVerifyOnline(operationCtx, app.BackupOnlineVerifyRequest{
 		BackupCreateRequest: app.BackupCreateRequest{
 			Target: request.Target, ProfileID: request.ProfileID,
-			RootPassword: root, HostKeyPolicy: s.hostPolicy(request),
+			RootPassword: root, HostKeyPolicy: s.hostPolicy(request), Credentials: request.credentials(),
 		},
 		BackupDir: request.BackupDir,
 	}, s.events(request.OperationID))
@@ -340,6 +370,7 @@ func (s *Service) GuidePlan(ctx context.Context, request GuideRequest) (app.Guid
 	report, err := s.application.GuidePlan(operationCtx, app.GuideRequest{
 		Target: request.Target, ProfileID: request.ProfileID, Goals: request.Goals, RootPassword: root,
 		ResetRootPassword: request.ResetRootPassword, HostKeyPolicy: s.policy(request.OperationID, request.HostKey),
+		Credentials: request.credentials(),
 	}, s.events(request.OperationID))
 	return report, resolution(report.Status, err)
 }
@@ -365,7 +396,7 @@ func (s *Service) GuideApply(ctx context.Context, request GuideRequest) (app.Gui
 	report, err := s.application.GuideApply(operationCtx, app.GuideApplyRequest{
 		Confirmation: *request.Confirmation, PlanDigest: request.PlanDigest, Confirmed: request.Confirmed,
 		AdminPassword: admin, RootPassword: root, HostKeyPolicy: s.policy(request.OperationID, request.HostKey),
-		ToolVersion: request.ToolVersion,
+		ToolVersion: request.ToolVersion, Credentials: request.credentials(),
 	}, s.events(request.OperationID))
 	return report, s.settle(request.OperationID, "guide apply", report, report.Status, err)
 }
@@ -379,6 +410,26 @@ func (s *Service) AcknowledgeRecovery(ctx context.Context, request OperationRequ
 	defer finish()
 	report, err := s.application.AcknowledgeRecovery(operationCtx, request.Target)
 	return report, s.settle(request.OperationID, "recovery ack", report, report.Status, err)
+}
+
+// CredentialStatus lists the saved passwords' metadata; no binding ever returns a password.
+func (s *Service) CredentialStatus() (app.CredentialReport, error) {
+	report, err := s.application.ListCredentials()
+	return report, resolution(report.Status, err)
+}
+
+// ForgetCredential forgets the saved passwords matching the filter.
+func (s *Service) ForgetCredential(filter CredentialFilter) (app.CredentialReport, error) {
+	report, err := s.application.ForgetCredentials(credentials.Filter{
+		Kind: credentials.Kind(filter.Kind), Scope: filter.Scope, Host: filter.Host, Port: filter.Port,
+	})
+	return report, resolution(report.Status, err)
+}
+
+// ForgetAllCredentials forgets every saved password and deletes the vault key.
+func (s *Service) ForgetAllCredentials() (app.CredentialReport, error) {
+	report, err := s.application.ForgetAllCredentials()
+	return report, resolution(report.Status, err)
 }
 
 // Catalog lists the registered device models and exact firmware profiles. It needs no operation ID, no
