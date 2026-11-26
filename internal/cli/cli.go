@@ -281,6 +281,7 @@ func ExecuteWithInput(
 	addOperationCommands(root, options)
 	addGuideCommands(root, options)
 	addCredentialCommands(root, options)
+	addMCPCommands(root, options)
 
 	if err := root.ExecuteContext(ctx); err != nil {
 		_, _ = fmt.Fprint(stderr, redactor.Text(fmt.Sprintf("Error: %v\n", err)))
@@ -465,7 +466,8 @@ func exitCode(err error) int {
 		device.CodeOperationLocked,
 		device.CodeSoftConfigConflict,
 		device.CodeBackupMissing,
-		device.CodeRecoveryReviewRequired:
+		device.CodeRecoveryReviewRequired,
+		device.CodeAgentWritesDisabled:
 		return 9
 	case device.CodeCredentialNotFound:
 		return 2

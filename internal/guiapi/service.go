@@ -1,4 +1,4 @@
-// Package guiapi adapts typed application use cases to desktop bindings.
+// Package guiapi adapts typed application use cases to frontend bindings: the desktop app and the MCP server.
 package guiapi
 
 import (

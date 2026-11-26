@@ -173,24 +173,46 @@ routerctl \
 
 Read `RISKS.md` and `RECOVERY.md` first. The acknowledgement is the resolved profile's own phrase (`RD08-DEEP` for `xiaomi-rd08-1.1.96`); the interactive prompt shows it, and when registered profiles use different phrases it asks for `--profile` or `--ack-deep`. `--yes` has no effect on this dedicated acknowledgement. An existing `<host>-deep.json` in the run directory blocks the operation. Without `--run-dir` the journal lives in the router's managed deep directory, so a retry with other ports still meets it. Do not rename an old journal merely to bypass the safety gate.
 
+## Agent access (MCP)
+
+`routerctl mcp` serves the Model Context Protocol so an AI agent can run detection, backups and guided setup. Read the "Agent access" section of `RISKS.md` first; the binding rules are in §23 of `docs/rd08-protocol-spec.md`.
+
+```bash
+# stdio: the agent host starts this command itself
+routerctl mcp
+routerctl mcp --allow-writes          # also offer guide_apply and soft_remove
+
+# Streamable HTTP at http://127.0.0.1:18731/mcp with a bearer token
+export ROUTERCTL_MCP_TOKEN="$(routerctl mcp token)"
+routerctl mcp --http 127.0.0.1:18731
+routerctl mcp --http 0.0.0.0:18731 --token-file ~/.config/routerctl/mcp.token   # LAN: plaintext warning
+```
+
+- Tools that never change the router: `list_profiles`, `preflight`, `guide_plan`, `deep_status`, `backup_create` (reads the router, writes the managed backup directory), `saved_passwords`, `operation_wait`, `operation_list`. `operation_cancel` stops an operation of this server, which can leave a write partial. With `--allow-writes`: `guide_apply` (runs a plan from `guide_plan` once) and `soft_remove`. Deep persistence, `recovery ack`, forgetting passwords and Telnet are never offered.
+- Tool arguments may carry the admin and root passwords; `use_saved_password` uses the vault instead. Results never contain passwords. `host_key_sha256` cannot be combined with `use_saved_password`, because a pin replaces the known_hosts check. Argument names match exactly (case-sensitive, no duplicates, no unknown names).
+- A call waits at most `wait_seconds` (default 20, maximum 50) and then returns `done: false` with an `operation_id`; continue with `operation_wait`. The operation keeps running when the agent stops waiting; only `operation_cancel` or stopping the server cancels it.
+- With `--http`, every request needs `Authorization: Bearer <token>`. The token comes from `--token-file` (a regular file of at most 4 KiB, refused when group- or world-readable on macOS and Linux) or `ROUTERCTL_MCP_TOKEN`; after trimming it must have at least 32 printable ASCII characters without spaces. The host part of the address must be an IP address or `localhost`; port `0` picks a free port. The bound URL is printed on stderr.
+- stdout carries only MCP messages; warnings and one JSON audit line per tool call and per finished operation go to stderr.
+- Exit codes: `0` after a clean stop (SIGINT, SIGTERM, or the end of input over stdio), `2` for invalid flags, address or token, `10` when an operation was still running at exit (stderr names it), `12` when listening or serving fails. A stop cancels running operations and ends waiting calls at once.
+
 ## Output and exit codes
 
 Human reports go to stdout; progress and warnings go to stderr. `--json` emits one JSON report object on stdout, including failed operations where a report is available. Run reports are unique 0600 JSON files under `run-dir`; deep operations additionally write the stable-stage journal.
 
-| Exit | Meaning                                                                             |
-| ---: | ----------------------------------------------------------------------------------- |
-|    0 | All required evidence passed or the exact target state already existed              |
-|    2 | CLI/configuration/password validation, or no usable saved password                  |
-|    3 | Network/transport/protocol connection failure                                       |
-|    4 | Web/SSH/Telnet authentication failure                                               |
-|    5 | Device/profile/capability/host-key compatibility failure                            |
-|    6 | Device API explicitly rejected a request                                            |
-|    7 | Remote command or tool failure                                                      |
-|    8 | Final state/root/reboot verification failure                                        |
-|    9 | Safety precondition, confirmation, lock, deep journal, or recovery gate             |
-|   10 | Partial completion, cleanup failure, or unknown remote result                       |
-|   11 | Local backup integrity/disk verification, recovery record or password vault failure |
-|   12 | Unexpected internal error                                                           |
-|  130 | Cancellation                                                                        |
+| Exit | Meaning                                                                                     |
+| ---: | ------------------------------------------------------------------------------------------- |
+|    0 | All required evidence passed or the exact target state already existed                      |
+|    2 | CLI/configuration/password validation, or no usable saved password                          |
+|    3 | Network/transport/protocol connection failure                                               |
+|    4 | Web/SSH/Telnet authentication failure                                                       |
+|    5 | Device/profile/capability/host-key compatibility failure                                    |
+|    6 | Device API explicitly rejected a request                                                    |
+|    7 | Remote command or tool failure                                                              |
+|    8 | Final state/root/reboot verification failure                                                |
+|    9 | Safety precondition, confirmation, lock, deep journal, recovery gate, or agent write switch |
+|   10 | Partial completion, cleanup failure, or unknown remote result                               |
+|   11 | Local backup integrity/disk verification, recovery record or password vault failure         |
+|   12 | Unexpected internal error                                                                   |
+|  130 | Cancellation                                                                                |
 
-Nonzero statuses require reading the report. In particular, `partial` and `unknown` are not safe automatic-retry signals.
+Nonzero statuses require reading the report. In particular, `partial` and `unknown` are not safe automatic-retry signals. `routerctl mcp` uses 10 and 12 as described in [Agent access (MCP)](#agent-access-mcp).
