@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"io/fs"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/sunerpy/router-tools/internal/device"
 	"github.com/sunerpy/router-tools/internal/guiapi"
 	"github.com/sunerpy/router-tools/internal/mcpserver"
+	"github.com/sunerpy/router-tools/skills"
 )
 
 var readTools = []string{
@@ -786,4 +788,32 @@ func TestRejectedToolCallsAreAudited(t *testing.T) {
 		}
 		return found == 2
 	})
+}
+
+// Hosts without the skill see only the server instructions, so they carry the first-run host-key decision and
+// the exact recovery command.
+func TestInstructionsCoverHostKeysAndRecovery(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, newFakeBackend(), false)
+	instructions := h.session.InitializeResult().Instructions
+	for _, part := range []string{"enable_ssh", "accept_new_host_key", "routerctl --host <address> recovery ack", "operation_wait"} {
+		if !strings.Contains(instructions, part) {
+			t.Fatalf("instructions lack %q:\n%s", part, instructions)
+		}
+	}
+}
+
+// The skill names every tool the server can offer, so renaming a tool fails here until SKILL.md follows.
+func TestSkillNamesEveryTool(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t, newFakeBackend(), true)
+	data, err := fs.ReadFile(skills.RouterTools(), "SKILL.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range h.toolNames() {
+		if !strings.Contains(string(data), "`"+name+"`") {
+			t.Fatalf("SKILL.md does not mention the tool %s", name)
+		}
+	}
 }

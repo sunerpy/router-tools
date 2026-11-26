@@ -64,6 +64,7 @@ A remote write timeout is `unknown`. Accepted writes followed by failure are at 
 - Every use-case call becomes an operation owned by the server, not by the request: a call waits at most 50 seconds, and a client cancellation or timeout only ends the wait. `operation_cancel`, `Stop`/`Shutdown` and process exit cancel operations; a stop also ends waiting calls at once. Events are redacted when they arrive and results when the operation ends, value by value, after which the operation keeps no password. Guided plans are kept server-side under a one-shot `plan_id`.
 - HTTP wraps the SDK handler in cross-origin protection and a bearer-token check (SHA-256, constant-time), keeps the SDK's DNS-rebinding protection, caps bodies at 1 MiB and serves only `/mcp`.
 - Each tool call writes a `call` audit record and each operation a `finish` record (before it is marked done); calls the SDK rejects before any handler are audited by a receiving middleware. The CLI prints the records as JSON lines on stderr. No record carries arguments, passwords, tokens or report bodies.
+- `skills` embeds the `router-tools` skill (`SKILL.md` first in `skills.Files()`). `internal/agentsetup` is pure: a table of agent hosts, `Build` for the per-host snippet (no file access), and `InstallSkill` for the temp-directory-and-rename install. `internal/cli/skill.go` adds `skill show|install` and `mcp config` on top; nothing edits another program's configuration.
 
 ## Local integrity and journals
 

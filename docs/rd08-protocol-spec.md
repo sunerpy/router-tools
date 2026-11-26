@@ -189,11 +189,15 @@ rd08ctl
 ├── credentials
 │   ├── list
 │   └── forget
-└── mcp
-    └── token
+├── mcp
+│   ├── token
+│   └── config
+└── skill
+    ├── show
+    └── install
 ```
 
-`setup` 是引导流程（§10.4）；`recovery ack` 记录对不确定变更的人工检查（§16.6）；`credentials` 列出或忘记已保存的密码（§16.7）；`mcp` 启动 Agent 接入的 MCP 服务，`mcp token` 生成 HTTP 访问令牌（§23）。
+`setup` 是引导流程（§10.4）；`recovery ack` 记录对不确定变更的人工检查（§16.6）；`credentials` 列出或忘记已保存的密码（§16.7）；`mcp` 启动 Agent 接入的 MCP 服务，`mcp token` 生成 HTTP 访问令牌，`mcp config` 输出各 Agent 宿主的接入配置，`skill` 输出或安装随附的 Agent skill（§23）。
 
 ### 4.2 全局参数
 
@@ -1893,6 +1897,13 @@ Windows 产物使用 `.exe`。版本、commit 和构建时间通过独立变量�
 ### 23.8 审计
 
 每次工具调用返回时写一条 `call` 记录（包括 `done=false` 的返回），每个操作结束时写一条 `finish` 记录，`finish` 记录写在操作被标为完成之前，进程在停止后立即退出也不会丢失。SDK 在进入工具之前拒绝的调用（例如未开启写入时调用写工具）也写一条 `call` 记录，状态为 `failed`，错误码为 `UNKNOWN_TOOL` 或 `PROTOCOL_ERROR`，工具名只在形如工具名时保留。字段为时间、记录类型、工具、操作 ID、规范化主机、状态、错误码、耗时和是否完成；不包含参数、密码、令牌或报告正文。CLI 以 JSON 行写到 stderr。
+
+### 23.9 宿主配置与 skill
+
+1. `routerctl mcp config --agent <宿主>` 只输出文本：配置片段、它所在的文件，以及宿主自带的添加命令（如有）。它从不修改其他程序的配置。stdio 片段用当前 `routerctl` 的绝对路径；HTTP 片段从 `ROUTERCTL_MCP_TOKEN` 读取令牌（`generic` 用 `<token>` 占位），从不包含令牌本身。片段不开启写入：用户需要自己在参数里加 `--allow-writes`。宿主文档或源码中会移动配置目录的变量（`CLAUDE_CONFIG_DIR`、`CODEX_HOME`、opencode 的 `OPENCODE_CONFIG_DIR` 和 `XDG_CONFIG_HOME`（前者优先）、`PI_CODING_AGENT_DIR`、`DSH_HOME`）已设置时，输出移动后的文件。Codex 不向 stdio 服务传递 `XDG_CONFIG_HOME`；在 `os.UserConfigDir` 跟随该变量的系统（macOS、Windows 除外）上，变量设为 `$HOME/.config` 以外的目录时，片段和命令都写入该值，否则 Agent 启动的 `routerctl` 会使用另一套锁、变更结果记录、known_hosts 和保险库，§16.6 的阻断在两边互不生效。Windows 命令用双引号；路径或 URL 含 `$`、反引号或 `%` 时 PowerShell 或 cmd.exe 会改写它们，此时不输出命令。
+2. 支持的宿主及格式以 `docs/agents.md` 和其中引用的宿主文档为准。WorkBuddy 只文档化了 stdio，带 `--http` 时以退出码 `2` 拒绝。opencode 片段使用 1.x 与 2.x 都能读取的 `mcp.<名称>` 形式。
+3. skill 随二进制内嵌（`skills/router-tools`）。`routerctl skill install` 写入 `<目录>/router-tools`：新安装先写入同目录下的临时目录再改名；内容一致时不写（内容按路径读取，指向相同内容的链接视为一致）；内容不同时没有 `--force` 就拒绝，`--force` 只重写 skill 自带的文件，保留其他文件。以下情况拒绝，退出码 `9`：`<目录>/router-tools` 或其中要创建的子目录是符号链接或不是目录；要写入的文件位置是符号链接或目录。比较内容时只读取普通文件（或指向普通文件的链接），管道等其他特殊文件视为内容不同，`--force` 时被替换。`<目录>` 及其上级按普通路径解析，可以是符号链接。其他文件系统错误退出码 `12`。`--agent` 只用文档确认过的用户目录（`claude-code` 为 `~/.claude/skills`，设置 `CLAUDE_CONFIG_DIR` 时为其下的 `skills`；`codex`、`opencode`、`pi`、`dsh` 为 `~/.agents/skills`，`dsh` 在设置 `DSH_AGENTS_HOME` 时为其下的 `skills`），变量值不是绝对路径时拒绝并提示改用 `--dir`；其他宿主必须用 `--dir`。
+4. MCP 服务的 instructions 和 skill 都要求：计划中 `enable_ssh` 为 `run` 时，Agent 先征得用户同意信任路由器的 SSH 主机密钥，再在 `guide_apply` 中传 `accept_new_host_key: true`。CLI 的 MCP 服务没有主机密钥确认器（§23.5(3)）：密钥未知且不传该参数时，SSH 原本开启的路由器在写入前失败；SSH 原本关闭的路由器在开启 SSH 的写入完成后 root 验证失败，结果为 `partial` 并阻断后续写入。known_hosts 中已有匹配条目时不需要该参数；密钥变化（`HOST_KEY_MISMATCH`）时无论是否传入都拒绝。
 
 ## 附录 A：固定常量与测试向量
 

@@ -24,6 +24,7 @@
 - A write-ahead recovery record per router that blocks further changes after an uncertain one until `recovery ack`.
 - Opt-in saved passwords in an AES-256-GCM vault (`--remember-password`, `--use-saved-password`, `credentials list|forget`), saved only after the router accepted them and never sent over Telnet.
 - `routerctl mcp`: a Model Context Protocol server for AI agents over stdio, or Streamable HTTP with a bearer token; router writes only with `--allow-writes`, deep persistence and recovery acknowledgement never (see [docs/usage.md](docs/usage.md#agent-access-mcp) and `RISKS.md`).
+- An embedded agent skill (`routerctl skill show|install`) and per-host setup (`routerctl mcp config --agent <id>`) for Claude Code, Codex CLI, opencode, pi, DeepSeek Harness (dsh), WorkBuddy and other MCP clients (see [docs/agents.md](docs/agents.md)).
 
 ## Command tree
 
@@ -48,8 +49,12 @@ routerctl
 ├── credentials
 │   ├── list
 │   └── forget [--kind] [--scope] [--host] [--port] | --all
-└── mcp [--http <ip:port>] [--allow-writes] [--token-file <file>]
-    └── token
+├── mcp [--http <ip:port>] [--allow-writes] [--token-file <file>]
+│   ├── token
+│   └── config --agent <id> [--http <url>]
+└── skill
+    ├── show
+    └── install --agent <id> | --dir <directory> [--force]
 ```
 
 Run `routerctl <command> --help` for command flags. See [docs/usage.md](docs/usage.md) for secret input and examples.

@@ -282,6 +282,7 @@ func ExecuteWithInput(
 	addGuideCommands(root, options)
 	addCredentialCommands(root, options)
 	addMCPCommands(root, options)
+	addSkillCommands(root, options)
 
 	if err := root.ExecuteContext(ctx); err != nil {
 		_, _ = fmt.Fprint(stderr, redactor.Text(fmt.Sprintf("Error: %v\n", err)))
