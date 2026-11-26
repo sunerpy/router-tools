@@ -34,6 +34,10 @@ export function DeepPersist(arg1) {
   return window['go']['main']['App']['DeepPersist'](arg1);
 }
 
+export function DeepStatus(arg1) {
+  return window['go']['main']['App']['DeepStatus'](arg1);
+}
+
 export function Doctor(arg1) {
   return window['go']['main']['App']['Doctor'](arg1);
 }

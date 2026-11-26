@@ -51,31 +51,19 @@ defineProps<{ errors?: Record<string, string> }>();
         mono
         required
       />
-      <TextInput
-        id="target-profile"
-        :error="errors?.['target-profile']"
-        v-model="store.profileID"
-        class="target-form__profile"
-        label="设备 Profile"
-        hint="auto 只在唯一精确匹配时继续，其他固件会被拒绝。"
-        mono
-        required
-      />
     </div>
   </div>
 </template>
 
 <style scoped>
-/* Container-local layout: the same form sits in a narrow split column (dashboard) and a full-width
+/* Container-local layout: the same form sits in a narrow split column (guide) and a full-width
    card (settings), so it reacts to its own width rather than the viewport (DESIGN.md §2). */
 .target-form-container {
   container-type: inline-size;
 }
 .target-form {
   display: grid;
-  grid-template-columns:
-    minmax(0, 1.4fr) repeat(3, minmax(0, 0.8fr))
-    minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 0.8fr));
   align-items: start;
   gap: var(--rt-space-3);
 }
@@ -83,8 +71,7 @@ defineProps<{ errors?: Record<string, string> }>();
   .target-form {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-  .target-form__host,
-  .target-form__profile {
+  .target-form__host {
     grid-column: span 3;
   }
 }
@@ -92,8 +79,7 @@ defineProps<{ errors?: Record<string, string> }>();
   .target-form {
     grid-template-columns: minmax(0, 1fr);
   }
-  .target-form__host,
-  .target-form__profile {
+  .target-form__host {
     grid-column: auto;
   }
 }

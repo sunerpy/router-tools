@@ -125,7 +125,7 @@ After a change ended `partial` or `unknown`, failed after a write may have been 
 | Backups without `--output`      | `<home>/RouterTools/backups/<model>/<host>-<key>/<UTC stamp>/` |
 | Saved passwords                 | `<user config dir>/routerctl/credentials/`                     |
 
-`<host>` is the canonical host (IP literals normalized, host names in lower case) and `<key>` the first 12 hex characters of the router's port-independent recovery key, so changing a management port or the spelling of the host never selects another lock, record or directory. A journal in a custom `--run-dir`, or written by the desktop deep flow, is found only in that directory; check it before another deep attempt.
+`<host>` is the canonical host (IP literals normalized, host names in lower case) and `<key>` the first 12 hex characters of the router's port-independent recovery key, so changing a management port or the spelling of the host never selects another lock, record or directory. A journal in a custom `--run-dir`, or written by a desktop build from before the 向导 page (which used the directory you chose), is found only in that directory; check it before another deep attempt. The current desktop deep flow always uses the managed directory.
 
 ## Temporary SSH enable
 

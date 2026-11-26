@@ -109,7 +109,7 @@ Normal tests never contact a real router. HTTP uses `httptest`; SSH and Telnet u
 
 ## Desktop GUI
 
-The Wails application implements the same operations with typed bindings, operation-scoped events, cancellation, host-key dialogs, private reports, and deep-persist confirmation flows. `DESIGN.md` locks the design system: 白瓷 (light, default) and 石墨 (dark) themes with bundled fonts; `/primitives` is the development showcase.
+The Wails application runs the same use cases through typed bindings. Its 向导 page detects the router's state and runs only the missing steps of the guided flow after one confirmation, like `routerctl setup`; 维护 holds soft-persistence removal, root and backup verification and the raw preflight, 深度固化 the high-risk flow with its read-only status check, and 设置 the saved passwords and host keys. Runs report progress per operation, can be canceled, and keep their reports for the session. `DESIGN.md` locks the design system: 白瓷 (light, default) and 石墨 (dark) themes with bundled fonts; development builds add the `/primitives` showcase.
 
 ```bash
 make gui-test

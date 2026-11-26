@@ -18,7 +18,7 @@ There is deliberately no automatic `resume`, `restore`, or one-click rescue comm
 Every device change (`enable`, `persist soft`, `persist remove`, `reboot-verify`, `deep-persist`, and each write step of `setup`) first stores a record in `<user config dir>/routerctl/state/` and refuses to start if it cannot. While the last change of a router is recorded as `in_progress` (the process stopped or its final record failed), `partial`, `unknown`, or `failed` after a write may have been submitted, every further change of that router fails with `RECOVERY_REVIEW_REQUIRED` (exit 9), whichever ports are used.
 
 1. Check the router as described above and for the stage the report names.
-2. Only then run `routerctl recovery ack`. The desktop app gets its acknowledgement entry with the guided wizard; until then use the command line. Acknowledging records when you checked; the record itself is kept, and a later uncertain change blocks again.
+2. Only then run `routerctl recovery ack`. In the desktop app, the 向导 page offers 我已检查路由器 when detection is blocked; it records the same acknowledgement. Acknowledging records when you checked; the record itself is kept, and a later uncertain change blocks again.
 3. Acknowledging is not a repair. It only states that you know the router's actual state and accept continuing from it.
 
 The record keeps the adapter's evidence (`write_evidence`): whether a write started, accepted enable steps, the temporary MAC rules that were attempted and those whose removal failed, and the deep journal path. Use it when the run report is no longer available.
@@ -27,7 +27,7 @@ The record keeps the adapter's evidence (`write_evidence`): whether a write star
 
 ## Deep journals outside the managed directory
 
-Without a run directory, `deep-persist` keeps its journal in the router's managed directory, so any later attempt finds it. Journals written to a custom `--run-dir`, and by the desktop deep flow (which still uses the directory you choose until the guided redesign), are found only in that directory. Before another deep attempt, check every earlier run directory for a journal of the router.
+Without a run directory, `deep-persist` keeps its journal in the router's managed directory, so any later attempt finds it. The desktop deep flow always uses the managed directory too. Journals written to a custom `--run-dir`, and by desktop builds from before the 向导 page (which wrote to the directory you chose), are found only in that directory. Before another deep attempt, check every earlier run directory for a journal of the router.
 
 ## If a guided run stopped
 

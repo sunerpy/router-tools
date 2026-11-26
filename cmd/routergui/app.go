@@ -89,6 +89,11 @@ func (a *App) AcknowledgeRecovery(request guiapi.OperationRequest) (app.Recovery
 	return a.service.AcknowledgeRecovery(a.ctx, request)
 }
 
+// DeepStatus reads the deep-persistence page's state without changing the router.
+func (a *App) DeepStatus(request guiapi.OperationRequest) (app.DeepStatusReport, error) {
+	return a.service.DeepStatus(a.ctx, request)
+}
+
 // CredentialStatus lists saved passwords without their values.
 func (a *App) CredentialStatus() (app.CredentialReport, error) { return a.service.CredentialStatus() }
 

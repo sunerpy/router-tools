@@ -264,6 +264,44 @@ export interface RecoveryReport {
   error?: ReportError;
 }
 
+/** Read-only deep-persistence state of the device (app.DeepInspection). */
+export interface DeepInspection {
+  flags: "all_set" | "none" | "mixed";
+  crash_partition: boolean;
+  crash_readable: boolean;
+}
+
+export type DeepBlocked =
+  | "recovery_review_required"
+  | "journal_exists"
+  | "flags_already_set"
+  | "flags_mixed"
+  | "crash_partition_unavailable"
+  | "no_verified_backup";
+
+/** What the deep-persistence page shows before a run (app.DeepStatusReport). */
+export interface DeepStatusReport {
+  schema_version: number;
+  operation: "deep status";
+  status: string;
+  host: string;
+  device: Observation;
+  profile: Profile;
+  candidates?: ProfileMatch[];
+  journal_path?: string;
+  journal_exists: boolean;
+  backups: ManagedBackup[];
+  /** The probed SSH port state; root verification and inspection run only when it is open. */
+  ssh?: string;
+  root_ssh: "verified" | "auth_failed" | "not_checked";
+  inspection?: DeepInspection;
+  recovery?: OutcomeRecord;
+  blocked: DeepBlocked[];
+  ready: boolean;
+  credentials?: CredentialNote[];
+  error?: ReportError;
+}
+
 /** What happened to a saved or remembered password (app.CredentialNote); never the value. */
 export interface CredentialNote {
   kind: "web-admin" | "root";
@@ -318,12 +356,15 @@ export interface RouterAPI {
   GuidePlan(request: GuideRequest): Promise<GuidePlanReport>;
   GuideApply(request: GuideRequest): Promise<GuideApplyReport>;
   AcknowledgeRecovery(request: OperationRequest): Promise<RecoveryReport>;
+  DeepStatus(request: OperationRequest): Promise<DeepStatusReport>;
   CredentialStatus(): Promise<CredentialReport>;
   ForgetCredential(filter: CredentialFilter): Promise<CredentialReport>;
   ForgetAllCredentials(): Promise<CredentialReport>;
   Catalog(): Promise<CatalogEntry[]>;
   Cancel(operationID: string): Promise<boolean>;
   ListReports(): Promise<HistoryEntry[]>;
+  /** Opens the system folder picker; resolves an empty string when canceled. */
+  SelectDirectory(): Promise<string>;
   ResolveHostKey(promptID: string, accept: boolean): void;
   OnProgress(callback: (payload: ProgressPayload) => void): () => void;
   OnHostKey(callback: (prompt: HostKeyPrompt) => void): () => void;

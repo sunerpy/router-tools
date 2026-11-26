@@ -215,6 +215,22 @@ export namespace app {
 		    return a;
 		}
 	}
+	export class DeepInspection {
+	    flags: string;
+	    crash_partition: boolean;
+	    crash_readable: boolean;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeepInspection(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.flags = source["flags"];
+	        this.crash_partition = source["crash_partition"];
+	        this.crash_readable = source["crash_readable"];
+	    }
+	}
 	export class DeepResult {
 	    status: string;
 	    accepted_writes: number;
@@ -302,6 +318,103 @@ export namespace app {
 		}
 	}
 	
+	export class ManagedBackup {
+	    path: string;
+	    // Go type: time
+	    created_at: any;
+	    boot_id: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ManagedBackup(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.path = source["path"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.boot_id = source["boot_id"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DeepStatusReport {
+	    schema_version: number;
+	    operation: string;
+	    status: string;
+	    host: string;
+	    device: device.Observation;
+	    profile: device.Profile;
+	    candidates?: device.ProfileMatch[];
+	    journal_path?: string;
+	    journal_exists: boolean;
+	    backups: ManagedBackup[];
+	    root_ssh: string;
+	    inspection?: DeepInspection;
+	    recovery?: state.Outcome;
+	    blocked: string[];
+	    ready: boolean;
+	    credentials?: CredentialNote[];
+	    error?: device.Error;
+	
+	    static createFrom(source: any = {}) {
+	        return new DeepStatusReport(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.schema_version = source["schema_version"];
+	        this.operation = source["operation"];
+	        this.status = source["status"];
+	        this.host = source["host"];
+	        this.device = this.convertValues(source["device"], device.Observation);
+	        this.profile = this.convertValues(source["profile"], device.Profile);
+	        this.candidates = this.convertValues(source["candidates"], device.ProfileMatch);
+	        this.journal_path = source["journal_path"];
+	        this.journal_exists = source["journal_exists"];
+	        this.backups = this.convertValues(source["backups"], ManagedBackup);
+	        this.root_ssh = source["root_ssh"];
+	        this.inspection = this.convertValues(source["inspection"], DeepInspection);
+	        this.recovery = this.convertValues(source["recovery"], state.Outcome);
+	        this.blocked = source["blocked"];
+	        this.ready = source["ready"];
+	        this.credentials = this.convertValues(source["credentials"], CredentialNote);
+	        this.error = this.convertValues(source["error"], device.Error);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class DoctorReport {
 	    schema_version: number;
 	    operation: string;
@@ -730,41 +843,6 @@ export namespace app {
 	        this.inputs = source["inputs"];
 	        this.maintenance = source["maintenance"];
 	    }
-	}
-	export class ManagedBackup {
-	    path: string;
-	    // Go type: time
-	    created_at: any;
-	    boot_id: string;
-	
-	    static createFrom(source: any = {}) {
-	        return new ManagedBackup(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.path = source["path"];
-	        this.created_at = this.convertValues(source["created_at"], null);
-	        this.boot_id = source["boot_id"];
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
 	}
 	export class GuideState {
 	    ssh?: string;

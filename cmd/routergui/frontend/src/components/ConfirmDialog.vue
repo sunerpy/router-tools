@@ -76,12 +76,13 @@ function cancel() {
         >
           {{ description }}
         </p>
+        <slot />
         <div v-if="requireText" class="confirm-dialog__ack">
           <label :for="ackID">输入 {{ requireText }} 以继续</label>
           <NInput
             v-model:value="acknowledgement"
             :input-props="{ id: ackID, autocomplete: 'off', spellcheck: 'false' }"
-            placeholder="RD08-DEEP"
+            placeholder=""
           />
         </div>
         <div class="cluster confirm-dialog__actions">

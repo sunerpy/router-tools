@@ -2,6 +2,7 @@ import type {
   CatalogEntry,
   CredentialEntry,
   CredentialReport,
+  DeepStatusReport,
   GuideApplyReport,
   GuideGoal,
   GuidePlanReport,
@@ -49,12 +50,14 @@ export function createAPI(): RouterAPI {
       GuidePlan: (request) => app.GuidePlan(request),
       GuideApply: (request) => app.GuideApply(request),
       AcknowledgeRecovery: (request) => app.AcknowledgeRecovery(request),
+      DeepStatus: (request) => app.DeepStatus(request),
       CredentialStatus: () => app.CredentialStatus(),
       ForgetCredential: (filter) => app.ForgetCredential(filter),
       ForgetAllCredentials: () => app.ForgetAllCredentials(),
       Catalog: () => app.Catalog(),
       Cancel: (id) => app.Cancel(id),
       ListReports: () => app.ListReports(),
+      SelectDirectory: () => app.SelectDirectory(),
       ResolveHostKey: (id, accept) => app.ResolveHostKey(id, accept),
       OnProgress: (callback) => window.runtime!.EventsOn("operation:progress", callback),
       OnHostKey: (callback) => window.runtime!.EventsOn("hostkey:confirm", callback),
@@ -425,6 +428,67 @@ function previewApply(request: GuideRequest, scenario: string): GuideApplyReport
   };
 }
 
+// Preview-only deep status shaped like app.DeepStatusReport.
+// Like the Go use case, the preview keeps the deep journal in the managed directory; the window never
+// chooses another one.
+const PREVIEW_JOURNAL =
+  "~/.config/routerctl/deep/xiaomi-rd08/192.168.31.1-preview/192.168.31.1-deep.json";
+
+function previewDeepStatus(
+  request: OperationRequest,
+  scenario: string,
+  vault: CredentialEntry[],
+): DeepStatusReport {
+  const host = request.Target.host.toLowerCase();
+  const savedRoot =
+    request.UseSavedPassword &&
+    vault.some(
+      (entry) =>
+        entry.kind === "root" && entry.host === host && entry.port === request.Target.ssh_port,
+    );
+  const verified = Boolean(request.RootPassword) || savedRoot;
+  const blocked: DeepStatusReport["blocked"] = [];
+  if (scenario === "recovery") blocked.push("recovery_review_required");
+  if (scenario === "journal") blocked.push("journal_exists");
+  const backups =
+    scenario === "failed"
+      ? []
+      : [
+          {
+            path: "~/RouterTools/backups/xiaomi-rd08/192.168.31.1-preview/20261126T010000Z",
+            created_at: "2026-11-26T01:00:00Z",
+            boot_id: "preview",
+          },
+        ];
+  if (backups.length === 0) blocked.push("no_verified_backup");
+  return {
+    schema_version: 1,
+    operation: "deep status",
+    status: "succeeded",
+    host: request.Target.host,
+    device: {
+      device_id: "PREVIEW",
+      hardware: "RD08",
+      display_name: "Xiaomi BE6500 Pro",
+      rom_version: "1.1.96",
+      new_encrypt_mode: 1,
+    },
+    profile: previewProfile,
+    journal_path: PREVIEW_JOURNAL,
+    journal_exists: scenario === "journal",
+    backups,
+    ssh: "open",
+    root_ssh: verified ? "verified" : "not_checked",
+    inspection: verified
+      ? { flags: "none", crash_partition: true, crash_readable: true }
+      : undefined,
+    blocked,
+    ready: verified && blocked.length === 0,
+    credentials:
+      savedRoot && !request.RootPassword ? [{ kind: "root", action: "used_saved" }] : undefined,
+  };
+}
+
 function createMockAPI(): RouterAPI {
   const history: HistoryEntry[] = [];
   // Preview-only vault: metadata of "saved" passwords, never a value.
@@ -435,7 +499,9 @@ function createMockAPI(): RouterAPI {
     status: "succeeded",
     entries: entries.map((entry) => ({ ...entry })),
   });
-  let progressListener: ((payload: any) => void) | undefined;
+  const progressListeners = new Set<(payload: any) => void>();
+  const progressListener = (payload: any) =>
+    progressListeners.forEach((listener) => listener(payload));
   let hostKeyListener: ((prompt: HostKeyPrompt) => void) | undefined;
 
   window.__routerHostKey = () =>
@@ -450,12 +516,12 @@ function createMockAPI(): RouterAPI {
   async function run(operation: string, request: OperationRequest): Promise<any> {
     const scenario = window.__ROUTER_PREVIEW_SCENARIO__ || "success";
     const failed = scenario === "failed";
-    progressListener?.({
+    progressListener({
       operation_id: request.OperationID,
       event: { operation, stage: "PRECHECK", status: "running", time: new Date().toISOString() },
     });
     await new Promise((resolve) => setTimeout(resolve, 180));
-    progressListener?.({
+    progressListener({
       operation_id: request.OperationID,
       event: {
         operation,
@@ -494,10 +560,7 @@ function createMockAPI(): RouterAPI {
               ],
             }
           : undefined,
-      journal_path:
-        operation === "deep-persist" && !failed
-          ? `${request.RunDir}/192.168.31.1-deep.json`
-          : undefined,
+      journal_path: operation === "deep-persist" && !failed ? PREVIEW_JOURNAL : undefined,
       message: scenario === "long" ? "X".repeat(6000) : undefined,
       error:
         status === "succeeded"
@@ -558,7 +621,7 @@ function createMockAPI(): RouterAPI {
       }
       const scenario = window.__ROUTER_PREVIEW_SCENARIO__ || "success";
       for (const step of request.Confirmation.steps) {
-        progressListener?.({
+        progressListener({
           operation_id: request.OperationID,
           event: {
             operation: "guide apply",
@@ -629,6 +692,10 @@ function createMockAPI(): RouterAPI {
       });
       return report;
     },
+    DeepStatus: async (request) => {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      return previewDeepStatus(request, window.__ROUTER_PREVIEW_SCENARIO__ || "success", vault);
+    },
     CredentialStatus: async () => credentialReport("credentials list", vault),
     ForgetCredential: async (filter) => {
       const invalid =
@@ -662,11 +729,13 @@ function createMockAPI(): RouterAPI {
     Catalog: async () => previewCatalog,
     Cancel: async () => true,
     ListReports: async () => [...history],
+    SelectDirectory: async () =>
+      "~/RouterTools/backups/xiaomi-rd08/192.168.31.1-preview/20261126T010000Z",
     ResolveHostKey: () => {},
     OnProgress: (callback) => {
-      progressListener = callback;
+      progressListeners.add(callback);
       return () => {
-        progressListener = undefined;
+        progressListeners.delete(callback);
       };
     },
     OnHostKey: (callback) => {
