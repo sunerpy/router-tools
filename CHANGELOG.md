@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/sunerpy/router-tools/compare/v0.1.0...v0.1.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **gui:** 桌面端记录自身版本号 ([#11](https://github.com/sunerpy/router-tools/issues/11)) ([361127c](https://github.com/sunerpy/router-tools/commit/361127c2f1a8e1db368f7853c4fd6779ba654f14))
+
 ## 0.1.0 (2026-11-27)
 
 
