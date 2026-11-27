@@ -10,7 +10,7 @@
   "info": {
     "companyName": "router-tools contributors",
     "productName": "Router Tools",
-    "productVersion": "0.0.0",
+    "productVersion": "0.1.0",
     "copyright": "Copyright (c) 2026 router-tools contributors",
     "comments": "Safety-gated router management for exact firmware profiles"
   }
