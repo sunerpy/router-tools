@@ -26,18 +26,24 @@ type App struct {
 	service *guiapi.Service
 	broker  *promptBroker
 	agents  *agentaccess.Controller
+	// version is this binary's version, which the build injects into internal/buildinfo.
+	version string
 }
 
 // NewApp constructs the desktop binding around the shared application service. Agent operations run through
 // the same guiapi.Service, so their progress reaches both the window and the MCP server, an unknown host key
 // in an agent run opens the same dialog, and their reports join the history marked as agent runs.
 func NewApp(application guiapi.Application, paths wiring.Paths) *App {
+	return newApp(application, paths, buildinfo.Current().Version)
+}
+
+func newApp(application guiapi.Application, paths wiring.Paths, version string) *App {
 	broker := &promptBroker{pending: make(map[string]chan bool)}
-	app := &App{broker: broker}
+	app := &App{broker: broker, version: version}
 	operations := mcpserver.NewOperations()
 	app.service = guiapi.New(application, fanout{runtimeEmitter{app: app}, operations}, broker)
 	app.agents = agentaccess.New(app.service, operations, agentaccess.Options{
-		SettingsDir: paths.MCP, Version: buildinfo.Current().Version, GOOS: goruntime.GOOS,
+		SettingsDir: paths.MCP, Version: version, GOOS: goruntime.GOOS,
 		Home: os.UserHomeDir, Getenv: os.Getenv, OnChange: app.emitAgentStatus,
 	})
 	broker.owns = app.agents.Owns
@@ -107,7 +113,9 @@ func (a *App) RebootVerify(request guiapi.OperationRequest) (app.RebootReport, e
 	return a.service.RebootVerify(a.ctx, request)
 }
 
+// BackupCreate records this binary's version in the manifest; the window never supplies it.
 func (a *App) BackupCreate(request guiapi.OperationRequest) (app.BackupCreateReport, error) {
+	request.ToolVersion = a.version
 	return a.service.BackupCreate(a.ctx, request)
 }
 
@@ -129,8 +137,9 @@ func (a *App) GuidePlan(request guiapi.GuideRequest) (app.GuidePlanReport, error
 	return a.service.GuidePlan(a.ctx, request)
 }
 
-// GuideApply runs a confirmed guided plan.
+// GuideApply runs a confirmed guided plan; its backup step records this binary's version, as BackupCreate does.
 func (a *App) GuideApply(request guiapi.GuideRequest) (app.GuideApplyReport, error) {
+	request.ToolVersion = a.version
 	return a.service.GuideApply(a.ctx, request)
 }
 

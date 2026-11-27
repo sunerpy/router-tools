@@ -17,7 +17,6 @@ function makeRequest(): OperationRequest {
     BackupDir: "",
     RunDir: "",
     AckDeep: "",
-    ToolVersion: "dev",
     UseSavedPassword: false,
     RememberPassword: false,
     HostKey: { KnownHostsPath: "", PinSHA256: "", AcceptNew: false },
