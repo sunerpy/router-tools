@@ -26,7 +26,6 @@ export interface OperationRequest {
   BackupDir: string;
   RunDir: string;
   AckDeep: string;
-  ToolVersion: string;
   HostKey: HostKeyPreferences;
   /** Fill passwords left empty from the encrypted vault; deep persistence ignores it. */
   UseSavedPassword: boolean;
@@ -112,7 +111,6 @@ export interface GuideRequest {
   Confirmation: GuideConfirmation | null;
   PlanDigest: string;
   Confirmed: boolean;
-  ToolVersion: string;
   HostKey: HostKeyPreferences;
   UseSavedPassword: boolean;
   RememberPassword: boolean;

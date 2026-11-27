@@ -68,6 +68,7 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 project="$root/cmd/routergui"
 bin_dir="$project/build/bin"
 
+need go "install Go 1.27 (https://go.dev/dl)"
 need node "install Node.js 24 (https://nodejs.org)"
 need pnpm "corepack enable, or npm install --global pnpm@9.15.9"
 need wails "go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1"
@@ -91,6 +92,23 @@ if [ -n "$release_version" ] && [ "$version" != "$release_version" ]; then
 	die "wails.json info.productVersion is $version but the release version is $release_version"
 fi
 
+# The desktop binary carries the same build metadata as routerctl (internal/buildinfo): its MCP service
+# reports this version, and backup manifests created by the window or by an agent record it.
+buildinfo=github.com/sunerpy/router-tools/internal/buildinfo
+commit=$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo unknown)
+build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+ldflags="-X $buildinfo.Version=v$version -X $buildinfo.CommitID=$commit -X $buildinfo.BuildTime=$build_time"
+
+# check_buildinfo BINARY fails unless the Go build info of BINARY records the injected version. It reads the
+# -ldflags that Go records in the build info, which Go omits under -trimpath; adding -trimpath to the builds
+# below needs another check.
+check_buildinfo() {
+	local info recorded
+	info=$(go version -m "$1") || die "go version -m cannot read $1"
+	recorded=$(printf '%s\n' "$info" | sed -n 's/.*buildinfo\.Version=\([^ "]*\).*/\1/p')
+	[ "$recorded" = "v$version" ] || die "$1 records buildinfo version '${recorded:-none}', expected v$version"
+}
+
 out_dir=${out_dir:-$root/dist-gui}
 mkdir -p "$out_dir"
 out_dir=$(cd "$out_dir" && pwd)
@@ -106,9 +124,10 @@ if [ "$platform" = windows ]; then
 	exe="$bin_dir/routergui.exe"
 	installer="$bin_dir/Router Tools-amd64-installer.exe"
 	rm -f "$exe" "$installer"
-	(cd "$project" && wails build -platform windows/amd64 -nsis -skipbindings -o routergui.exe)
+	(cd "$project" && wails build -platform windows/amd64 -nsis -skipbindings -ldflags "$ldflags" -o routergui.exe)
 	[ -f "$exe" ] || die "wails did not produce $exe"
 	[ -f "$installer" ] || die "wails did not produce $installer"
+	check_buildinfo "$exe"
 
 	# The installer must carry exactly the executable this run built.
 	"$sevenzip" x -y -o"$work/installer" "$installer" "Router Tools.exe" >/dev/null
@@ -129,7 +148,7 @@ if [ "$platform" = windows ]; then
 else
 	app="$bin_dir/Router Tools.app"
 	rm -rf "$app"
-	(cd "$project" && wails build -platform darwin/universal -skipbindings)
+	(cd "$project" && wails build -platform darwin/universal -skipbindings -ldflags "$ldflags")
 	[ -d "$app" ] || die "wails did not produce $app"
 
 	plist="$app/Contents/Info.plist"
@@ -139,6 +158,10 @@ else
 	archs=$(lipo -archs "$app/Contents/MacOS/$executable")
 	case " $archs " in *" x86_64 "*) ;; *) die "app lacks x86_64 ($archs)" ;; esac
 	case " $archs " in *" arm64 "*) ;; *) die "app lacks arm64 ($archs)" ;; esac
+	for arch in x86_64 arm64; do
+		lipo -thin "$arch" -output "$work/$executable-$arch" "$app/Contents/MacOS/$executable"
+		check_buildinfo "$work/$executable-$arch"
+	done
 
 	zip_name="router-tools_${version}_darwin_universal.zip"
 	rm -f "$out_dir/$zip_name"

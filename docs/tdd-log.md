@@ -267,6 +267,14 @@ A sixth round closed every round-5 item and found no new defect in the code. It 
 
 CI then failed `TestMCPStdioKeepsStdoutForProtocolMessages` (from §34) once: the `tools/list` response was missing. The SDK answers calls concurrently, so `tools/call` (id 3) can finish before `tools/list` (id 2), and the test closed stdin as soon as it saw id 3, which ends the session before the listing is written. Two hundred local runs, with one and two CPUs, never reproduced it. The test now waits for both responses before closing stdin; its assertions are unchanged.
 
+## 37. Desktop builds record their own version
+
+The released v0.1.0 desktop app called itself `dev` in two ways. `scripts/package-gui.sh` ran `wails build` without the `internal/buildinfo` flags that GoReleaser gives `routerctl`, so the desktop's MCP service announced version `dev` and its agent-started backups recorded it. The window also sent a hard-coded `ToolVersion: "dev"`, which `guiapi` passed into the manifest written by the guided run's backup step, the only backup the window starts. `routerctl` and `routerctl mcp` were correct.
+
+Red: `TestWindowRequestsRecordThisBinarysVersion` (`cmd/routergui`) sends a backup and a guided run through the window's bindings, once with an empty and once with a `dev` version, and expects the application to receive the binary's version. It failed with `backup with tool version "" recorded ""`. Green: `NewApp` reads the version from `internal/buildinfo` once, gives it to agent access, and the `BackupCreate` and `GuideApply` bindings stamp it over the request; the frontend no longer sends `ToolVersion`.
+
+The packaging script now passes `v` plus `info.productVersion`, the short commit and the UTC build time through `wails build -ldflags`, and fails unless `go version -m` of the built executable records that version (each architecture of the universal binary on macOS). A local Windows package recorded `-X github.com/sunerpy/router-tools/internal/buildinfo.Version=v0.1.0` ahead of Wails' own `-w -s -H windowsgui`; a copy of the script without the flags stopped with `records buildinfo version 'none', expected v0.1.0` before writing any asset.
+
 ## Required final gates
 
 ```bash

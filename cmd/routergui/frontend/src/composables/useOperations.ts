@@ -150,7 +150,6 @@ export function useOperations(api: RouterAPI) {
       BackupDir: backupDir.value,
       RunDir: runDir.value,
       AckDeep: ackDeep.value,
-      ToolVersion: "dev",
       UseSavedPassword: false,
       RememberPassword: false,
       HostKey: { ...hostKey },

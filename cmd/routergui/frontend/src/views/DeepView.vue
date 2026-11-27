@@ -82,7 +82,6 @@ async function readStatus() {
       BackupDir: "",
       RunDir: "",
       AckDeep: "",
-      ToolVersion: "dev",
       HostKey: { ...store.hostKey },
       UseSavedPassword: useSaved.value,
       RememberPassword: false,

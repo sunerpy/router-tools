@@ -13,7 +13,6 @@ function guideRequest(overrides: Partial<GuideRequest> = {}): GuideRequest {
     Confirmation: null,
     PlanDigest: "",
     Confirmed: false,
-    ToolVersion: "dev",
     HostKey: { KnownHostsPath: "", PinSHA256: "", AcceptNew: false },
     UseSavedPassword: false,
     RememberPassword: false,
